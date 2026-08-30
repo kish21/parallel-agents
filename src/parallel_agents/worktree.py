@@ -60,8 +60,13 @@ class WorktreeManager:
                 check=check,
             )
         except subprocess.CalledProcessError as e:
-            err_msg = e.stderr.strip() or e.stdout.strip()
-            raise GitError(f"Git command failed ('git {' '.join(args)}'): {err_msg}") from e
+            # Git writes progress ("Preparing worktree...") to stderr alongside the real
+            # error, so keep every line: truncating to one hid the actual cause.
+            streams = [s.strip() for s in (e.stderr, e.stdout) if s and s.strip()]
+            err_msg = " | ".join(" | ".join(s.splitlines()) for s in streams) or f"exit {e.returncode}"
+            raise GitError(
+                f"Git command failed ('git {' '.join(args)}', exit {e.returncode}): {err_msg}"
+            ) from e
 
     def is_git_repo(self) -> bool:
         try:

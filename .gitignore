@@ -7,7 +7,9 @@ worktrees/
 .env
 .env.*
 !.env.example
-.parallel-agents/
+# Runtime state, logs and worktrees are machine-local; the lane policy is not.
+.parallel-agents/*
+!.parallel-agents/config.yaml
 
 # Build artifacts & caches
 *.egg-info/

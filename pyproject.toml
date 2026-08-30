@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parallel-agents"
-version = "0.1.0"
+version = "0.2.0"
 description = "Mechanical Safety & Coordination Tool for Running Parallel AI Coding Agents"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -66,7 +66,18 @@ class StateManager:
         self._ensure_storage()
 
     def lock(self) -> StateLock:
+        """Serialises reads and writes of the JSON state files."""
         return StateLock(self.state_dir)
+
+    def git_lock(self) -> StateLock:
+        """Serialises repository-mutating git commands (worktree and branch creation).
+
+        Deliberately a *different* lock file from ``lock()``. Git worktree creation
+        mutates shared repository state (refs, the index, .git/worktrees) and is not safe
+        to run concurrently against one repository, but it is slow — holding the state
+        lock across it would block every `status` and `validate` for its duration.
+        """
+        return StateLock(self.state_dir, lock_name=".git.lock", timeout_seconds=120.0)
 
     def _ensure_storage(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)

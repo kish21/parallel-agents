@@ -194,13 +194,40 @@ def print_report(stats: dict):
     port_collision_rate = (stats['port_collisions'] / max(1, stats['cycles_completed'])) * 100
     detection_acc = (stats['violations_detected'] / max(1, stats['violations_tested'])) * 100
     
-    print(f"  • Worktree Collision Rate:      {wt_collision_rate:.1f}% (0 collisions)")
-    print(f"  • Port Race Condition Rate:     {port_collision_rate:.1f}% (0 collisions)")
+    print(f"  • Worktree Collision Rate:      {wt_collision_rate:.1f}% ({stats['worktree_collisions']} collisions)")
+    print(f"  • Port Race Condition Rate:     {port_collision_rate:.1f}% ({stats['port_collisions']} collisions)")
     print(f"  • Lane Violation Accuracy:      {detection_acc:.1f}% ({stats['violations_detected']}/{stats['violations_tested']} caught)")
     print(f"  • Worktree Leaks Post-Cleanup:  {stats['leaked_worktrees']}")
     print("=" * 70)
-    print(f"Reproducibility benchmark: {stats['cycles_completed']} cycles / {stats['total_agents_spawned']} agents completed with 0 observed worktree or port collisions and 100% detection of injected lane violations.")
+
+    # Report what actually happened. An earlier version printed a fixed
+    # "0 collisions / 100% detection" summary regardless of the measured stats, so a
+    # regression would have been reported as a clean run.
+    failures = []
+    if stats["worktree_collisions"]:
+        failures.append(f"{stats['worktree_collisions']} worktree collision(s)")
+    if stats["port_collisions"]:
+        failures.append(f"{stats['port_collisions']} port collision(s)")
+    if stats["violations_tested"] and stats["violations_detected"] < stats["violations_tested"]:
+        missed = stats["violations_tested"] - stats["violations_detected"]
+        failures.append(f"{missed} undetected lane violation(s)")
+    if stats["leaked_worktrees"]:
+        failures.append(f"{stats['leaked_worktrees']} leaked worktree(s)")
+    if stats["cycles_completed"] < stats["cycles_requested"]:
+        failures.append(
+            f"{stats['cycles_requested'] - stats['cycles_completed']} incomplete cycle(s)")
+
+    if failures:
+        print(f"❌ FAILED: {stats['cycles_completed']}/{stats['cycles_requested']} cycles — " + ", ".join(failures) + ".")
+    else:
+        print(
+            f"✅ PASSED: {stats['cycles_completed']} cycles / {stats['total_agents_spawned']} agents "
+            f"with 0 observed worktree or port collisions, "
+            f"{stats['violations_detected']}/{stats['violations_tested']} injected lane violations detected, "
+            f"and no leaked resources."
+        )
     print("=" * 70 + "\n")
+    return not failures
 
 
 if __name__ == "__main__":
@@ -209,4 +236,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     stats = run_benchmark(cycles=args.cycles)
-    print_report(stats)
+    passed = print_report(stats)
+    sys.exit(0 if passed else 1)

@@ -227,6 +227,27 @@ The goal is not to isolate every single file—it is to make parallel execution 
 
 ---
 
+### Lane enforcement fails closed
+
+Lane policy is only meaningful if it cannot be switched off by accident, so every lane
+lookup is strict:
+
+* `spawn --lane <name>` **rejects** a lane that is not declared in `config.yaml`, listing
+  the valid lanes. Nothing is provisioned — no branch, no worktree, no port reservation.
+* `validate` and `diff` **refuse** an agent whose lane is no longer declared (for example,
+  the lane was renamed or removed after the agent was spawned). They report a failure
+  rather than checking the agent against an empty policy.
+
+There is deliberately no permissive fallback. An unrecognised lane is a configuration
+error, never a lane that happens to allow every path.
+
+> **Commit `.parallel-agents/config.yaml`.** It is the policy every agent is validated
+> against — the team's shared contract. `parallel-agents init` adds ignore rules that keep
+> runtime state and worktrees out of git while leaving the config tracked. Without those
+> rules an agent running `git add -A` would sweep every other agent's worktree into its own
+> commit.
+
+
 ## Ports
 
 Parallel development servers need independent ports. Instead of hardcoding `8000`:
@@ -311,13 +332,23 @@ $ parallel-agents doctor
 🩺 PARALLEL AGENTS DOCTOR
 
   ✓ Git repository: Valid Git repository detected.
-  ✓ Configuration: Valid config.
-  ✓ Worktrees: All worktrees intact.
-  ✗ Port allocations: Port 8001 occupied by dead process.
-  ✓ Agent state
+  ✓ Configuration: Valid config (Project: demo, Max agents: 4).
+  ✓ Worktrees: All 1 agent worktrees are intact.
+  ✗ Port allocations: 2 port allocation issue(s) detected.
+      ↳ Port 3001 still reserved by stopped agent 'agent-001'.
+      ↳ Port 8001 still reserved by stopped agent 'agent-001'.
+  ✓ Agent processes: All active agent process states are consistent.
 
-1 problem found.
+⚠️ 1 problem(s) detected. Run 'parallel-agents repair' to fix.
 ```
+
+`doctor` reports three classes of problem:
+
+| Class | Meaning |
+|---|---|
+| **Orphaned** | A port is still reserved by an agent that has stopped, failed, completed, or no longer exists. If a process is *still listening* on it, it is reported as a leaked server. |
+| **Conflict** | The port ledger and an agent's own recorded ports disagree — the dangerous case, because the ledger could hand the same port to a second agent. |
+| **Stale process** | An agent is marked `RUNNING` but its PID is dead. |
 
 Run repair to automatically clean up orphaned resources:
 ```bash
@@ -414,7 +445,7 @@ python -m unittest discover tests
 ```
 ....................................
 ----------------------------------------------------------------------
-Ran 36 tests in 53.175s
+Ran 70 tests in 8.1s
 
 OK
 ```
@@ -424,7 +455,10 @@ OK
 * **Atomic Concurrency & Stress (`test_concurrency.py`, `test_e2e_concurrent.py`)**: Spawns up to 10 agents in parallel threads simultaneously across separate CPU workers to mechanically prove that re-entrant file locking (`StateLock`) assigns unique sequential IDs, dedicated Git worktrees, unique branches, and non-colliding ports atomically with zero lost state.
 * **Failure Modes & Transactional Rollbacks (`test_failure_modes.py`)**: Validates clean port rollback on port exhaustion, clean rollback when worktree creation fails (simulated disk/git failure), dead process diagnosis and recovery in `repair`, and protection of uncommitted developer code during cleanup.
 * **3-Agent Multi-Lane Workflow (`test_e2e_3agents.py`)**: Concurrently spawns Agent A (Backend), Agent B (Frontend), and Agent C (Service), verifies distinct physical worktrees, dedicated branches, and unique ports (`8001/3001`, `8002/3002`, `8003/3003`), validates in-lane edits (pass), proves deliberate cross-lane violations fail with exit code `2`, and cleanly reclaims all resources.
-* **Port Audit & Conflict Detection (`test_ports.py`, `test_port_audit.py`)**: Validates OS socket inspection, active process verification, and detection of orphaned or colliding port reservations.
+* **Port Audit & Conflict Detection (`test_ports.py`, `test_port_audit.py`, `test_port_conflicts.py`)**: Validates real OS socket probing (a bound socket is detected and skipped by the allocator), ledger/agent-state drift detection, leaked-server reporting on orphaned ports, and that a failed re-allocation never releases the agent's existing reservations.
+* **Fail-Closed Lane Enforcement (`test_lane_fail_closed.py`)**: Proves that an undeclared lane — a typo at spawn, or a lane deleted from the config afterwards — is rejected outright rather than validating as safe, and that a rejected spawn leaves behind no branch, worktree, or port reservation.
+* **Environment Injection (`test_env_injection.py`)**: Round-trips hostile task strings (quotes, newlines, `$VAR`, backticks, `$(...)`) through a real `/bin/sh` to prove generated `.env` and `.lane` files cannot be escaped or executed.
+* **Repository Hygiene (`test_init_gitignore.py`)**: Proves `git add -A` cannot stage agent worktrees or runtime state, while the shared lane policy stays tracked.
 * **Diagnostics & Recovery (`test_doctor.py`, `test_cleanup.py`)**: Validates automatic detection of missing worktrees, orphaned port reclamation, and uncommitted developer code protection.
 
 ---
@@ -439,14 +473,20 @@ python benchmarks/benchmark_parallel.py --cycles 5
 ======================================================================
   • Total Cycles Executed:        5 / 5
   • Total Agents Spawned:         15
+  • Total Execution Time:         7.02s
+----------------------------------------------------------------------
   • Worktree Collision Rate:      0.0% (0 collisions)
   • Port Race Condition Rate:     0.0% (0 collisions)
   • Lane Violation Accuracy:      100.0% (5/5 caught)
   • Worktree Leaks Post-Cleanup:  0
 ======================================================================
-Reproducibility benchmark: 5 cycles / 15 agents completed with 0 observed worktree or port collisions and 100% detection of injected lane violations.
+✅ PASSED: 5 cycles / 15 agents with 0 observed worktree or port collisions, 5/5 injected lane violations detected, and no leaked resources.
 ======================================================================
 ```
+
+Every number above is measured at run time. The benchmark exits non-zero on any collision,
+leak, or undetected violation, so CI fails rather than printing a clean summary over a bad
+run.
 
 ---
 
