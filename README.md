@@ -42,7 +42,23 @@ Within hours, the system descends into chaos:
 > 
 > If your codebase has 4 separable code paths, adding a 5th agent produces merge collisions, not a 5th stream of work. Scaling parallel agents requires **physical lane boundaries, deterministic port allocations, and honest capability declarations**.
 
-This repository is the battle-tested system that turns that chaos into a quiet, predictable assembly line.
+---
+
+## 🎯 Who This Is For
+
+This framework is built for developers and engineering leaders looking to scale AI-driven delivery without drowning in merge conflicts:
+
+* **Solo Founders & Tech Leads ("The 1-Person Software Factory")**: Run 4 parallel AI agents on your product without spending your afternoon fixing crossed-up dev ports or 3-way merge conflicts.
+* **Engineering Leads & CTOs**: Adopt AI coding tools (Claude, Cursor, Copilot, Gemini) with clear guardrails—enforcing code boundaries, security DoD, and mandatory PR quality gates.
+* **Full-Stack Developers**: Level up from single-file "vibe coding" to multi-stream feature engineering across complex full-stack apps.
+* **Agencies & Consultancies**: Deliver client projects faster with repeatable bootstrap tooling (`./bootstrap.sh`) and optimized CI allowances.
+
+| Persona | Primary Goal | The Problem This Solves |
+| :--- | :--- | :--- |
+| **Solo Founders** | 4x development throughput | Eliminates dev server port clashes & merge gridlock |
+| **Engineering Leads** | Safe team-wide AI adoption | Enforces code boundaries, security DoD, and review gates |
+| **Full-Stack Devs** | Multi-stream parallel workflow | Replaces messy git branching with clean, isolated worktrees |
+| **Agencies** | Rapid client delivery | Provides instant, repeatable project bootstrapping in < 30s |
 
 ---
 
