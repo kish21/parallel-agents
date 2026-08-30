@@ -45,6 +45,7 @@ class StateLock:
         start_time = time.time()
 
         while True:
+            fd = None
             try:
                 fd = os.open(str(self.lock_file), os.O_CREAT | os.O_RDWR)
                 if sys.platform == "win32":
@@ -56,6 +57,11 @@ class StateLock:
                 self._tls.depth_map[lock_key] = 1
                 return
             except (IOError, OSError):
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
                 if (time.time() - start_time) > self.timeout_seconds:
                     raise FileLockError(
                         f"Timeout ({self.timeout_seconds}s) waiting to acquire lock on {self.lock_file}"

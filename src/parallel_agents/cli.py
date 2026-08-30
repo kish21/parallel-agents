@@ -139,62 +139,63 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"❌ Error loading project: {e}", file=sys.stderr)
         return 1
 
-    # Check capacity
-    active_agents = [a for a in state_mgr.list_agents() if a.status != AgentStatus.STOPPED.value]
-    if len(active_agents) >= config.max_agents and not args.force:
-        print(f"❌ Max concurrent agents reached ({config.max_agents}). Use --force or stop an existing agent.", file=sys.stderr)
-        return 1
+    with state_mgr.lock():
+        # Check capacity
+        active_agents = [a for a in state_mgr.list_agents() if a.status != AgentStatus.STOPPED.value]
+        if len(active_agents) >= config.max_agents and not args.force:
+            print(f"❌ Max concurrent agents reached ({config.max_agents}). Use --force or stop an existing agent.", file=sys.stderr)
+            return 1
 
-    # Generate sequential ID
-    existing_ids = {a.id for a in state_mgr.list_agents()}
-    idx = 1
-    while f"agent-{idx:03d}" in existing_ids:
-        idx += 1
-    agent_id = f"agent-{idx:03d}"
+        # Generate sequential ID
+        existing_ids = {a.id for a in state_mgr.list_agents()}
+        idx = 1
+        while f"agent-{idx:03d}" in existing_ids:
+            idx += 1
+        agent_id = f"agent-{idx:03d}"
 
-    name = args.name or f"worker-{idx}"
-    lane = args.lane
-    task = args.task or "General development"
-    seat = args.seat or ("SR1" if "senior" in name.lower() else "JR1")
+        name = args.name or f"worker-{idx}"
+        lane = args.lane
+        task = args.task or "General development"
+        seat = args.seat or ("SR1" if "senior" in name.lower() else "JR1")
 
-    # 1. Allocate Ports
-    try:
-        allocated_ports = port_mgr.allocate_ports_for_agent(agent_id)
-    except Exception as e:
-        print(f"❌ Port allocation failed: {e}", file=sys.stderr)
-        return 1
+        # 1. Allocate Ports
+        try:
+            allocated_ports = port_mgr.allocate_ports_for_agent(agent_id)
+        except Exception as e:
+            print(f"❌ Port allocation failed: {e}", file=sys.stderr)
+            return 1
 
-    # 2. Create Worktree & Branch
-    branch_name = worktree_mgr.make_branch_name(agent_id, task, config.git.branch_prefix)
-    target_worktree_path = root / config.worktree_dir / agent_id
+        # 2. Create Worktree & Branch
+        branch_name = worktree_mgr.make_branch_name(agent_id, task, config.git.branch_prefix)
+        target_worktree_path = root / config.worktree_dir / agent_id
 
-    try:
-        print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
-        resolved_path = worktree_mgr.create_worktree(target_worktree_path, branch_name)
-    except Exception as e:
-        port_mgr.release_ports(agent_id)
-        print(f"❌ Worktree creation failed: {e}", file=sys.stderr)
-        return 1
+        try:
+            print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
+            resolved_path = worktree_mgr.create_worktree(target_worktree_path, branch_name)
+        except Exception as e:
+            port_mgr.release_ports(agent_id)
+            print(f"❌ Worktree creation failed: {e}", file=sys.stderr)
+            return 1
 
-    # 3. Create Agent State
-    agent = AgentState(
-        id=agent_id,
-        name=name,
-        seat=seat,
-        lane=lane,
-        task=task,
-        branch=branch_name,
-        worktree_path=str(resolved_path),
-        ports=allocated_ports,
-        status=AgentStatus.CREATED.value,
-    )
+        # 3. Create Agent State
+        agent = AgentState(
+            id=agent_id,
+            name=name,
+            seat=seat,
+            lane=lane,
+            task=task,
+            branch=branch_name,
+            worktree_path=str(resolved_path),
+            ports=allocated_ports,
+            status=AgentStatus.CREATED.value,
+        )
 
-    # 4. Generate .env and .lane files in worktree
-    env_mgr.write_agent_environment(resolved_path, agent)
+        # 4. Generate .env and .lane files in worktree
+        env_mgr.write_agent_environment(resolved_path, agent)
 
-    # 5. Start Agent (if command supplied) or initialize seat
-    agent = adapter.start(agent, resolved_path, command=args.command)
-    state_mgr.save_agent(agent)
+        # 5. Start Agent (if command supplied) or initialize seat
+        agent = adapter.start(agent, resolved_path, command=args.command)
+        state_mgr.save_agent(agent)
 
     ports_display = ", ".join(f"{k}: {v}" for k, v in allocated_ports.items())
     print(f"\n🚀 Agent '{name}' ({agent_id}) successfully spawned!")
