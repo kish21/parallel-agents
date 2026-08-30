@@ -5,99 +5,156 @@
 
 > **Run 2 to 6 AI coding agents simultaneously on one codebase without merge collisions, port clashes, or rotting prompts.**
 
-A vendor-neutral, project-neutral framework, guide, and drop-in scaffolding for parallel multi-agent software development.
-
-**Current Release**: [`v0.1.0` (Alpha / Foundation)](CHANGELOG.md)
+A practical blueprint, operational guide, and drop-in toolchain for parallel multi-agent software engineering.
 
 ---
 
-## 🚀 5-Minute Quickstart (Replicate in 4 Steps)
+## 📖 The Story: Why This Exists
 
-### Step 1: Bootstrap Your GitHub Project Board & Fields
-Create your delivery board, custom single-select fields (`Lane`, `Seat`, `Owner`), standard labels, and disjoint milestones automatically in under 30 seconds:
+### The Dream
+You set up 4 AI coding agent subscriptions (or open 4 agent tabs). You assign each a ticket, imagining a 4x boost in engineering velocity. You picture an autonomous software factory building your product in parallel.
+
+### The 24-Hour Reality (The Collision Trap)
+Within hours, the system descends into chaos:
+
+```
+                  ┌──────────────┐      ┌──────────────┐
+                  │   Agent 1    │      │   Agent 2    │
+                  │ (Frontend UI)│      │  (Backend)   │
+                  └──────┬───────┘      └──────┬───────┘
+                         │                     │
+                Starts on Port 3000   Hardcodes API to 8000
+                         │                     │
+                         ▼                     ▼
+                  ┌────────────────────────────────────┐
+                  │ 💥 CROSS-TALK: Agent 1's UI tests  │
+                  │ against Agent 2's uncommitted API! │
+                  └────────────────────────────────────┘
+```
+
+1. **The Dev Server Collision**: Agent A starts on port 8000; Agent B auto-increments to 8001. Agent A's browser frontend quietly connects to Agent B's uncommitted backend. You spend 2 hours debugging phantom bugs that only exist because two agents are talking to different code.
+2. **The Database Migration Disaster**: Two agents look at the `migrations/` folder at the same time. Both see `0042_user.sql`, so both name their new file `0043_feature.sql`. When both PRs merge, migrations fail with duplicate keys.
+3. **The Git Merge Gridlock**: Four agents push branches touching shared central files (`index.ts`, `routes.py`, `Makefile`). Instead of writing code, you spend your entire afternoon resolving 3-way merge conflicts.
+4. **The "Rotting Hand-Copied Prompt"**: You paste testing rules into prompt windows. By day three, one agent is running deprecated test commands that measure the wrong metrics, while another agent burns $20 in tokens re-reading massive command logs.
+
+### The Core Realization
+> **Seats are capped by non-overlapping code lanes, not by how many AI subscriptions you own.**
+> 
+> If your codebase has 4 separable code paths, adding a 5th agent produces merge collisions, not a 5th stream of work. Scaling parallel agents requires **physical lane boundaries, deterministic port allocations, and honest capability declarations**.
+
+This repository is the battle-tested system that turns that chaos into a quiet, predictable assembly line.
+
+---
+
+## 🧩 The 4 Core Ideas Explained Simply
+
+```
+┌───────────────────────────┬───────────────────────────┐
+│ 1. SEAT = SLOT            │ 2. LANE = CODE PATH       │
+│ Seats are permanent       │ Group by directory paths  │
+│ roles (SR1, JR1). Model   │ (interface/, service/),   │
+│ vendors live in a .lane   │ NEVER by broad feature    │
+│ config file.              │ topics.                   │
+├───────────────────────────┼───────────────────────────┤
+│ 3. DECLARE YOUR GATE      │ 4. FORGE-BOUND IDS        │
+│ Weaker models must state  │ Name migrations and files │
+│ what tests they ran in    │ after GitHub ticket IDs   │
+│ the PR before merging.    │ to kill race conditions.  │
+└───────────────────────────┴───────────────────────────┘
+```
+
+---
+
+## 🚀 Step-by-Step: From Zero to Parallel in 5 Minutes
+
+Follow these 4 steps to set up your repository for parallel agents:
+
+### Step 1: Bootstrap Your GitHub Delivery Board
+Instead of configuring project boards by hand, use the automated setup script to create custom single-select fields (`Lane`, `Seat`, `Owner`), status columns, standard labels, and disjoint milestones in under 30 seconds:
 
 ```bash
-# 1. Copy config and add your repository name
+# 1. Copy the example config and add your repo name
 cp bootstrap.conf.example bootstrap.conf
 
 # 2. Run the bootstrap script
 ./bootstrap.sh
 ```
 
-### Step 2: Initialize 4 Isolated Worktrees & Seats
-Set up local worktrees with dedicated ports and seat identifiers:
+---
+
+### Step 2: Spin Up Isolated Worktrees & Seats
+Never let agents share one working directory or fight over git branches. Create isolated git worktrees with dedicated ports:
 
 ```bash
-# Create worktrees directory and 4 seats
+# 1. Create worktrees directory and 4 seats
 mkdir -p worktrees
 git worktree add worktrees/sr1 -b seat/sr1
 git worktree add worktrees/sr2 -b seat/sr2
 git worktree add worktrees/jr1 -b seat/jr1
 git worktree add worktrees/jr2 -b seat/jr2
 
-# Create seat marker files
+# 2. Drop the .lane seat identifier into each checkout
 echo 'SEAT="SR1"' > worktrees/sr1/.lane
 echo 'SEAT="SR2"' > worktrees/sr2/.lane
 echo 'SEAT="JR1"' > worktrees/jr1/.lane
 echo 'SEAT="JR2"' > worktrees/jr2/.lane
 ```
 
-### Step 3: Copy Drop-In GitHub & Git Templates
+---
+
+### Step 3: Drop In Quality Gates & Merge Rules
+Copy the ready-to-use PR template (with mandatory test execution declarations), issue forms, and union-merge git attributes:
+
 ```bash
-# Copy PR and Issue templates
+# 1. Copy GitHub Issue and PR templates
 mkdir -p .github/ISSUE_TEMPLATE
 cp templates/pull_request_template.md .github/
 cp templates/issue-template-task.yml .github/ISSUE_TEMPLATE/
 cp templates/issue-template-bug.yml .github/ISSUE_TEMPLATE/
 
-# Copy union merge rules
+# 2. Enable union merging for shared index files
 cp templates/gitattributes .gitattributes
 ```
 
+---
+
 ### Step 4: Launch Your Agent Sessions
-Paste the drop-in prompt templates from [`04-agent-setup.md`](04-agent-setup.md) into each agent harness (pointing `SR1`/`SR2` to senior roles, `JR1`/`JR2` to junior roles).
+Open an agent session in each worktree and paste the lightweight, non-rotting role prompt:
+
+* **In `worktrees/sr1` & `sr2` (Senior Seats)**: Paste the prompt from [`04-agent-setup.md §2`](04-agent-setup.md#2-drop-in-prompt-senior--lead-agent-sr1--sr2).
+* **In `worktrees/jr1` & `jr2` (Junior Seats)**: Paste the prompt from [`04-agent-setup.md §3`](04-agent-setup.md#3-drop-in-prompt-junior-agent-jr1--jr2).
+
+Your agents will now pick tickets assigned to their seat, work strictly inside their assigned code lane, and run verification tests on isolated ports.
 
 ---
 
-## 📚 The Complete Guide
+## 📚 The Complete Deep-Dive Handbook
 
-| Chapter | Topic | What You Learn / Copy |
+| Chapter | Topic | What It Teaches |
 | :--- | :--- | :--- |
-| **[01. Working Agreement](01-working-agreement.md)** | **Quality Bar & Contracts** | Definition-of-Done checklist, security boundaries, and PR review rules. |
-| **[02. Conflict Management](02-conflict-management.md)** | **Isolation & Migrations** | Port allocation matrix, worktree vs clone guide, and migration collision prevention. |
-| **[03. Orchestration](03-orchestration.md)** | **Capability Cards & Scaling** | 3-state capability model (`native`, `author-required`, `unavailable`) and review matrix. |
-| **[04. Per-Agent Setup](04-agent-setup.md)** | **Prompts & Session Hygiene** | Copy-paste prompt templates for Senior and Junior seats; token cost management. |
-| **[05. GitHub Mechanics](05-github-mechanics.md)** | **Board & Issue Routing** | Custom fields, disjoint milestones, sub-issues, and single-account routing. |
-| **[06. Free-Tier Operations](06-free-tier-ops.md)** | **CI & Verified Mirror** | Public vs. private trade-offs, divergence checkers, and CI minute optimization. |
+| **[01. Working Agreement](01-working-agreement.md)** | **Quality Bar & Contracts** | Definition-of-Done checklist, path boundary contracts, security rules, and merge discipline ("never merge without the owner"). |
+| **[02. Conflict Management](02-conflict-management.md)** | **Isolation & Migrations** | 4-seat port table, worktrees vs. separate clones, ticket-based migration IDs, and resolving shared index conflicts. |
+| **[03. Orchestration](03-orchestration.md)** | **Capability Cards & Scaling** | The 3-state capability model (`native` / `author-required` / `unavailable`), scaling 2→4→6 seats, and review chains. |
+| **[04. Per-Agent Setup](04-agent-setup.md)** | **Prompts & Session Hygiene** | Copy-paste prompt templates for Senior and Junior seats; controlling context token runaway. |
+| **[05. GitHub Mechanics](05-github-mechanics.md)** | **Board & Issue Routing** | Board single-select fields, disjoint milestones, sub-issues, and single-account routing. |
+| **[06. Free-Tier Operations](06-free-tier-ops.md)** | **CI & Verified Mirror** | Public vs. private trade-offs, divergence check scripts, and optimizing CI allowances per seat. |
 
 ---
 
-## 💡 Core Principles (Validated in Practice)
-
-1. **Seats are Capped by Lanes, Not Subscriptions**:
-   - If your codebase has 4 separable code paths, adding a 5th agent produces merge collisions, not more throughput. Scale by modularizing code paths.
-2. **Seats are Slots, Vendors are Lines in a Card**:
-   - Seats are fixed (`SR1`, `JR1`). Swapping AI models/vendors is a one-line edit in `.lane`—no board churn, no branch renames.
-3. **Make Weaker Harnesses Declare Themselves**:
-   - A weaker agent must state in the PR template which verification tests it actually executed, and stop completely when touching migrations or auth.
-4. **Use Forge Ticket IDs, Never Self-Chosen Counters**:
-   - Name migrations and generated assets after the GitHub ticket ID to prevent simultaneous counter collisions across seats.
-
----
-
-## 📦 Project Structure
+## 📦 Repository Structure
 
 ```
 parallel-agents/
-├── README.md                  # Quickstart and overview
-├── 01-working-agreement.md     # Definition of done & contracts
-├── 02-conflict-management.md   # Port matrix & worktree isolation
-├── 03-orchestration.md         # Capability cards & review chains
-├── 04-agent-setup.md          # Prompts & .lane configurations
-├── 05-github-mechanics.md     # Board fields & issue management
-├── 06-free-tier-ops.md        # CI optimization & verified mirror
+├── README.md                  # The Story, Concepts & 5-Minute Quickstart
+├── 01-working-agreement.md     # Quality Bar & Definition-of-Done
+├── 02-conflict-management.md   # Port Allocation & Collision Prevention
+├── 03-orchestration.md         # Capability Cards & Scaling Patterns
+├── 04-agent-setup.md          # Agent Prompts & Token Cost Control
+├── 05-github-mechanics.md     # GitHub Board & Issue Routing
+├── 06-free-tier-ops.md        # CI Minute Optimization & Verified Mirror
 ├── bootstrap.sh               # One-touch board setup script
 ├── bootstrap.conf.example     # Configuration for bootstrap script
+├── CHANGELOG.md               # Semantic Versioning Release Notes
 └── templates/                 # Ready-to-copy issue forms, PR templates & hooks
     ├── pull_request_template.md
     ├── issue-template-task.yml
@@ -111,4 +168,4 @@ parallel-agents/
 ---
 
 ## License
-MIT
+[MIT](LICENSE)
