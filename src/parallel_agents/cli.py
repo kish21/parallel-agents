@@ -303,22 +303,22 @@ def cmd_diff(args: argparse.Namespace) -> int:
     print(f"Branch: {agent.branch}")
     print(f"Total Modified Files: {len(changed_files)}\n")
 
-    if not changed_files:
-        print("  No changes detected in worktree.")
-        return 0
-
     for f in changed_files:
+        norm_f = LaneEngine.normalize_path(f)
+        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(p) for p in (".parallel-agents/", ".git/")):
+            continue
+
         violation = None
         if lane_res:
             for v in lane_res.violations:
-                if v.filepath == f:
+                if v.filepath == norm_f:
                     violation = v
                     break
 
         if violation:
-            print(f"  ✗ [OUT-OF-LANE] {f} ({violation.reason})")
+            print(f"  ✗ [OUT-OF-LANE] {norm_f} ({violation.reason})")
         else:
-            print(f"  ✓ [LANE OK]    {f}")
+            print(f"  ✓ [LANE OK]    {norm_f}")
 
     print()
     return 0
