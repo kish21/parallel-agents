@@ -9,8 +9,7 @@ worktrees/
 !.env.example
 .parallel-agents/
 
-# Tests & Build artifacts (Product focus)
-tests/
+# Build artifacts & caches
 *.egg-info/
 __pycache__/
 *.pyc

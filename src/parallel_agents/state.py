@@ -50,6 +50,8 @@ class AgentState:
         return cls(**data)
 
 
+from .lock import StateLock
+
 STATE_DIR = Path(".parallel-agents/state")
 AGENTS_FILE = STATE_DIR / "agents.json"
 PORTS_FILE = STATE_DIR / "ports.json"
@@ -62,6 +64,9 @@ class StateManager:
         self.agents_file = self.root_dir / AGENTS_FILE
         self.ports_file = self.root_dir / PORTS_FILE
         self._ensure_storage()
+
+    def lock(self) -> StateLock:
+        return StateLock(self.state_dir)
 
     def _ensure_storage(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
@@ -95,41 +100,47 @@ class StateManager:
         return None
 
     def list_agents(self) -> List[AgentState]:
-        data = self._read_json(self.agents_file)
-        return [AgentState.from_dict(val) for val in data.values()]
+        with self.lock():
+            data = self._read_json(self.agents_file)
+            return [AgentState.from_dict(val) for val in data.values()]
 
     def save_agent(self, agent: AgentState) -> None:
-        agent.updated_at = datetime.now(timezone.utc).isoformat()
-        data = self._read_json(self.agents_file)
-        data[agent.id] = agent.to_dict()
-        self._write_json(self.agents_file, data)
+        with self.lock():
+            agent.updated_at = datetime.now(timezone.utc).isoformat()
+            data = self._read_json(self.agents_file)
+            data[agent.id] = agent.to_dict()
+            self._write_json(self.agents_file, data)
 
     def remove_agent(self, agent_id: str) -> bool:
-        data = self._read_json(self.agents_file)
-        if agent_id in data:
-            del data[agent_id]
-            self._write_json(self.agents_file, data)
-            return True
-        return False
+        with self.lock():
+            data = self._read_json(self.agents_file)
+            if agent_id in data:
+                del data[agent_id]
+                self._write_json(self.agents_file, data)
+                return True
+            return False
 
     def get_allocated_ports(self) -> Dict[str, str]:
         """Returns map of port_number (str) -> agent_id."""
-        data = self._read_json(self.ports_file)
-        return {str(k): str(v) for k, v in data.items()}
+        with self.lock():
+            data = self._read_json(self.ports_file)
+            return {str(k): str(v) for k, v in data.items()}
 
     def allocate_port(self, port: int, agent_id: str) -> None:
-        data = self._read_json(self.ports_file)
-        data[str(port)] = agent_id
-        self._write_json(self.ports_file, data)
+        with self.lock():
+            data = self._read_json(self.ports_file)
+            data[str(port)] = agent_id
+            self._write_json(self.ports_file, data)
 
     def release_ports_for_agent(self, agent_id: str) -> List[int]:
-        data = self._read_json(self.ports_file)
-        released = []
-        new_data = {}
-        for port_str, assigned_agent in data.items():
-            if assigned_agent == agent_id:
-                released.append(int(port_str))
-            else:
-                new_data[port_str] = assigned_agent
-        self._write_json(self.ports_file, new_data)
-        return released
+        with self.lock():
+            data = self._read_json(self.ports_file)
+            released = []
+            new_data = {}
+            for port_str, assigned_agent in data.items():
+                if assigned_agent == agent_id:
+                    released.append(int(port_str))
+                else:
+                    new_data[port_str] = assigned_agent
+            self._write_json(self.ports_file, new_data)
+            return released
