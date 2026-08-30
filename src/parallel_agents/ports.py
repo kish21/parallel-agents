@@ -30,6 +30,7 @@ class PortManager:
         with self.state.lock():
             allocated_map = self.state.get_allocated_ports()
             allocated_ports_for_this_agent: Dict[str, int] = {}
+            new_allocations: Dict[int, str] = {}
 
             for category, p_range in self.config.port_ranges.items():
                 assigned_port = self._find_available_port(p_range, allocated_map)
@@ -40,11 +41,12 @@ class PortManager:
                         f"Port pool exhausted for category '{category}' (Range: {p_range.start}-{p_range.end})."
                     )
 
-                # Record allocation in state
-                self.state.allocate_port(assigned_port, agent_id)
+                new_allocations[assigned_port] = agent_id
                 allocated_map[str(assigned_port)] = agent_id
                 allocated_ports_for_this_agent[category] = assigned_port
 
+            # Atomic single-write persistence of all allocated ports
+            self.state.allocate_ports_atomic(new_allocations)
             return allocated_ports_for_this_agent
 
     def _find_available_port(

@@ -48,7 +48,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Run Automated Test Suite (24 Unit & E2E Integration Tests)
+      - name: Run Automated Test Suite (30 Unit, Concurrency & Failure Recovery Tests)
         run: |
           python -m unittest discover tests
-          echo "✅ All 24 unit and multi-agent integration tests passed."
+          echo "✅ All 30 unit, integration, stress, and failure recovery tests passed."
