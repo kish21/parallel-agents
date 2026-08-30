@@ -184,8 +184,9 @@ class Doctor:
                     self.state.save_agent(a)
                     actions_taken.append(f"Updated agent '{a.id}' status to FAILED (process had died).")
 
-        # 2. Prune Git worktrees
-        self.worktree_mgr.prune()
+        # 2. Prune Git worktrees (repository-mutating: serialise with spawn/cleanup)
+        with self.state.git_lock():
+            self.worktree_mgr.prune()
         actions_taken.append("Pruned stale Git worktree registrations.")
 
         # 3. Clean orphaned port records

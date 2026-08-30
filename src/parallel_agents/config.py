@@ -9,6 +9,26 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 
+class UnknownLaneError(KeyError):
+    """Raised when a lane is referenced that is not declared in the configuration.
+
+    Lane lookup fails closed: an undeclared lane is a configuration error, never a
+    silently-permissive lane. See ``Config.get_lane``.
+    """
+
+    def __init__(self, lane_name: str, known_lanes: List[str]):
+        self.lane_name = lane_name
+        self.known_lanes = sorted(known_lanes)
+        known = ", ".join(self.known_lanes) if self.known_lanes else "(none declared)"
+        super().__init__(
+            f"Unknown lane '{lane_name}'. Declared lanes: {known}."
+        )
+
+    def __str__(self) -> str:
+        # KeyError.__str__ wraps the message in repr quotes; restore the plain text.
+        return self.args[0]
+
+
 @dataclass
 class LaneConfig:
     name: str
@@ -50,6 +70,21 @@ class Config:
     git: GitConfig = field(default_factory=GitConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+
+    def get_lane(self, lane_name: str) -> LaneConfig:
+        """Returns the declared lane, or raises UnknownLaneError.
+
+        This is the only supported way to resolve a lane. It deliberately has no
+        permissive fallback: an unrecognised lane must stop the operation rather
+        than produce a lane that allows every path.
+        """
+        lane = self.lanes.get(lane_name)
+        if lane is None:
+            raise UnknownLaneError(lane_name, list(self.lanes.keys()))
+        return lane
+
+    def has_lane(self, lane_name: str) -> bool:
+        return lane_name in self.lanes
 
     @classmethod
     def default(cls, project_name: str = "my-project") -> Config:

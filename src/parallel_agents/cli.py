@@ -17,7 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from .adapters.process_adapter import ProcessAdapter
-from .config import Config, load_config, save_config
+from .config import Config, UnknownLaneError, load_config, save_config
 from .doctor import Doctor
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
@@ -47,10 +47,14 @@ def cmd_init(args: argparse.Namespace) -> int:
     state_mgr = StateManager(root)
     # Ensure worktree directory exists
     (root / cfg.worktree_dir).mkdir(parents=True, exist_ok=True)
+    gitignore_updated = ensure_gitignore(root)
 
     print(f"✨ Initialized parallel-agents for '{project_name}'")
     print(f"📁 Configuration written to {config_file}")
     print(f"📁 Worktrees directory: {cfg.worktree_dir}")
+    if gitignore_updated:
+        print("📝 Added parallel-agents rules to .gitignore (runtime state ignored, config tracked)")
+    print("\n⚠️  Commit .parallel-agents/config.yaml — it is the lane policy every agent is validated against.")
     print("\nNext: Run 'parallel-agents doctor' or spawn an agent with 'parallel-agents spawn --name <name> --lane <lane> --task <task>'")
     return 0
 
@@ -126,6 +130,39 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+GITIGNORE_BEGIN = "# --- parallel-agents (managed) ---"
+GITIGNORE_END = "# --- end parallel-agents ---"
+GITIGNORE_BLOCK = f"""{GITIGNORE_BEGIN}
+# Runtime state, logs and agent worktrees are machine-local and must never be committed.
+# Without these rules an agent running `git add -A` would sweep every other agent's
+# worktree into its own commit.
+/.parallel-agents/*
+# The lane policy is the team's shared contract — keep it tracked.
+!/.parallel-agents/config.yaml
+{GITIGNORE_END}
+"""
+
+
+def ensure_gitignore(root: Path) -> bool:
+    """Adds the managed ignore block to the repository .gitignore. Idempotent.
+
+    Returns True if the file was modified.
+    """
+    gitignore = root / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    if GITIGNORE_BEGIN in existing:
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    with open(gitignore, "a", encoding="utf-8") as f:
+        f.write(f"{prefix}\n{GITIGNORE_BLOCK}")
+    return True
+
+
+def target_path_for(root: Path, config: Config, agent_id: str) -> Path:
+    """Resolves the on-disk worktree location for an agent."""
+    return root / config.worktree_dir / agent_id
+
+
 def cmd_spawn(args: argparse.Namespace) -> int:
     root = Path.cwd()
     try:
@@ -139,60 +176,71 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"❌ Error loading project: {e}", file=sys.stderr)
         return 1
 
-    with state_mgr.lock():
-        # Check capacity
-        active_agents = [a for a in state_mgr.list_agents() if a.status != AgentStatus.STOPPED.value]
-        if len(active_agents) >= config.max_agents and not args.force:
-            print(f"❌ Max concurrent agents reached ({config.max_agents}). Use --force or stop an existing agent.", file=sys.stderr)
-            return 1
+    # Reject an undeclared lane before any resource is provisioned. A lane that is not
+    # in the config has no allow/deny policy, so an agent spawned into it could never be
+    # meaningfully validated.
+    if not config.has_lane(args.lane):
+        known = ", ".join(sorted(config.lanes)) or "(none declared)"
+        print(f"❌ Unknown lane '{args.lane}'. Declared lanes: {known}.", file=sys.stderr)
+        print("   Add the lane to .parallel-agents/config.yaml, or spawn into an existing one.", file=sys.stderr)
+        return 1
 
-        # Atomically generate next sequential ID under lock
-        agent_id = state_mgr.allocate_next_agent_id()
-        idx_str = agent_id.split("-")[-1]
+    # Phase 1 (locked): reserve identity and ports. The placeholder agent record is
+    # persisted inside the lock so a concurrent spawn immediately sees the ID as taken.
+    try:
+        with state_mgr.lock():
+            active_agents = [a for a in state_mgr.list_agents() if a.status != AgentStatus.STOPPED.value]
+            if len(active_agents) >= config.max_agents and not args.force:
+                print(f"❌ Max concurrent agents reached ({config.max_agents}). Use --force or stop an existing agent.", file=sys.stderr)
+                return 1
 
-        name = args.name or f"worker-{int(idx_str)}"
-        lane = args.lane
-        task = args.task or "General development"
-        seat = args.seat or ("SR1" if "senior" in name.lower() else "JR1")
+            agent_id = state_mgr.allocate_next_agent_id()
+            idx_str = agent_id.split("-")[-1]
 
-        # 1. Allocate Ports
-        try:
-            allocated_ports = port_mgr.allocate_ports_for_agent(agent_id)
-        except Exception as e:
-            print(f"❌ Port allocation failed: {e}", file=sys.stderr)
-            return 1
+            name = args.name or f"worker-{int(idx_str)}"
+            lane = args.lane
+            task = args.task or "General development"
+            seat = args.seat or ("SR1" if "senior" in name.lower() else "JR1")
+            branch_name = worktree_mgr.make_branch_name(agent_id, task, config.git.branch_prefix)
 
-        # 2. Create Worktree & Branch
-        branch_name = worktree_mgr.make_branch_name(agent_id, task, config.git.branch_prefix)
-        target_worktree_path = root / config.worktree_dir / agent_id
+            try:
+                allocated_ports = port_mgr.allocate_ports_for_agent(agent_id)
+            except Exception as e:
+                print(f"❌ Port allocation failed: {e}", file=sys.stderr)
+                return 1
 
-        try:
-            print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
-            resolved_path = worktree_mgr.create_worktree(target_worktree_path, branch_name)
-        except Exception as e:
-            port_mgr.release_ports(agent_id)
-            print(f"❌ Worktree creation failed: {e}", file=sys.stderr)
-            return 1
+            agent = AgentState(
+                id=agent_id, name=name, seat=seat, lane=lane, task=task,
+                branch=branch_name,
+                worktree_path=str(root / config.worktree_dir / agent_id),
+                ports=allocated_ports,
+                status=AgentStatus.CREATED.value,
+            )
+            state_mgr.save_agent(agent)
+    except Exception as e:
+        print(f"❌ Failed to reserve agent resources: {e}", file=sys.stderr)
+        return 1
 
-        # 3. Create Agent State
-        agent = AgentState(
-            id=agent_id,
-            name=name,
-            seat=seat,
-            lane=lane,
-            task=task,
-            branch=branch_name,
-            worktree_path=str(resolved_path),
-            ports=allocated_ports,
-            status=AgentStatus.CREATED.value,
-        )
-
-        # 4. Generate .env and .lane files in worktree
+    # Phase 2: create the worktree under the dedicated git lock, then do the rest
+    # unlocked. Concurrent `git worktree add` against one repository races on refs and the
+    # index, so it must be serialised — but only against other git operations, not against
+    # readers of the state file.
+    try:
+        print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
+        with state_mgr.git_lock():
+            resolved_path = worktree_mgr.create_worktree(target_path_for(root, config, agent_id), branch_name)
+        agent.worktree_path = str(resolved_path)
         env_mgr.write_agent_environment(resolved_path, agent)
-
-        # 5. Start Agent (if command supplied) or initialize seat
         agent = adapter.start(agent, resolved_path, command=args.command)
-        state_mgr.save_agent(agent)
+    except Exception as e:
+        # Roll the reservation back so a failed spawn leaks neither ports nor an ID.
+        port_mgr.release_ports(agent_id)
+        state_mgr.remove_agent(agent_id)
+        print(f"❌ Spawn failed: {e}", file=sys.stderr)
+        return 1
+
+    # Phase 3 (locked): commit the final, running state.
+    state_mgr.save_agent(agent)
 
     ports_display = ", ".join(f"{k}: {v}" for k, v in allocated_ports.items())
     print(f"\n🚀 Agent '{name}' ({agent_id}) successfully spawned!")
@@ -294,8 +342,13 @@ def cmd_diff(args: argparse.Namespace) -> int:
         return 1
 
     changed_files = worktree_mgr.get_changed_files(worktree_path)
-    lane_config = config.lanes.get(agent.lane)
-    lane_res = LaneEngine.validate_files(changed_files, lane_config) if lane_config else None
+    try:
+        lane_config = config.get_lane(agent.lane)
+    except UnknownLaneError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        print(f"   Agent '{agent.id}' cannot be diffed against an undeclared lane.", file=sys.stderr)
+        return 1
+    lane_res = LaneEngine.validate_files(changed_files, lane_config)
 
     print(f"\n📝 DIFF SUMMARY FOR {agent.name} ({agent.id})")
     print(f"Branch: {agent.branch}")
@@ -307,11 +360,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
             continue
 
         violation = None
-        if lane_res:
-            for v in lane_res.violations:
-                if v.filepath == norm_f:
-                    violation = v
-                    break
+        for v in lane_res.violations:
+            if v.filepath == norm_f:
+                violation = v
+                break
 
         if violation:
             print(f"  ✗ [OUT-OF-LANE] {norm_f} ({violation.reason})")
@@ -357,6 +409,14 @@ def cmd_validate(args: argparse.Namespace) -> int:
             icon = "✓" if q.passed else "✗"
             print(f"    {icon} {q.command} (Exit Code: {q.exit_code})")
 
+    # Always surface the error list. Some failure modes (an undeclared lane, a missing
+    # worktree) produce no per-file violations, and printing nothing but "FAILED" left the
+    # operator with no way to tell what went wrong.
+    if report.errors:
+        print("\n  [Errors]")
+        for err in report.errors:
+            print(f"    ✗ {err}")
+
     print("\n" + "=" * 50)
     if report.is_valid:
         print("✅ VALIDATION PASSED: PR is safe to submit and merge.")
@@ -398,10 +458,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     # 2. Release ports
     released = state_mgr.release_ports_for_agent(agent.id)
 
-    # 3. Remove worktree
+    # 3. Remove worktree (repository-mutating: same lock as creation)
     if worktree_path.exists():
         try:
-            worktree_mgr.remove_worktree(worktree_path, force=args.force)
+            with state_mgr.git_lock():
+                worktree_mgr.remove_worktree(worktree_path, force=args.force)
         except Exception as e:
             print(f"⚠️ Warning removing worktree: {e}")
 

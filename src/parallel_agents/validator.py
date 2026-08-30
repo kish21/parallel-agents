@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
-from .config import Config, LaneConfig
+from .config import Config, LaneConfig, UnknownLaneError
 from .lanes import LaneEngine, LaneValidationResult
 from .state import AgentState, StateManager
 from .worktree import WorktreeManager
@@ -67,9 +67,26 @@ class Validator:
             )
 
         # 1. Lane Path Validation
-        lane_config = self.config.lanes.get(agent.lane)
-        if not lane_config:
-            lane_config = LaneConfig(name=agent.lane, allow=[], deny=[])
+        #
+        # An agent carrying a lane that is not declared in the configuration cannot be
+        # validated at all: there is no policy to check it against. Report that as a
+        # failure. Substituting an empty allow/deny lane here would silently pass every
+        # file, turning a config typo into a total loss of lane enforcement.
+        try:
+            lane_config = self.config.get_lane(agent.lane)
+        except UnknownLaneError as e:
+            errors.append(
+                f"{e} Agent '{agent.id}' cannot be validated against an undeclared lane."
+            )
+            return ValidationReport(
+                agent_id=agent.id,
+                agent_name=agent.name,
+                lane=agent.lane,
+                is_valid=False,
+                worktree_valid=worktree_valid,
+                lane_result=LaneValidationResult(lane_name=agent.lane, is_valid=False),
+                errors=errors,
+            )
 
         changed_files = self.worktree_mgr.get_changed_files(worktree_path)
         lane_result = LaneEngine.validate_files(changed_files, lane_config)
