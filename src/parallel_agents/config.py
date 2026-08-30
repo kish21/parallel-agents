@@ -179,6 +179,11 @@ class Config:
 CONFIG_PATH = Path(".parallel-agents/config.yaml")
 
 
+def generate_default_config(project_name: str = "my-project") -> Config:
+    """Helper to generate a standard default Config object."""
+    return Config.default(project_name)
+
+
 def load_config(root_dir: Optional[Path] = None) -> Config:
     root = root_dir or Path.cwd()
     cfg_file = root / CONFIG_PATH

@@ -26,25 +26,26 @@ class PortManager:
             return res == 0
 
     def allocate_ports_for_agent(self, agent_id: str) -> Dict[str, int]:
-        """Allocates non-conflicting ports for all configured port categories."""
-        allocated_map = self.state.get_allocated_ports()
-        allocated_ports_for_this_agent: Dict[str, int] = {}
+        """Allocates non-conflicting ports atomically for all configured port categories."""
+        with self.state.lock():
+            allocated_map = self.state.get_allocated_ports()
+            allocated_ports_for_this_agent: Dict[str, int] = {}
 
-        for category, p_range in self.config.port_ranges.items():
-            assigned_port = self._find_available_port(p_range, allocated_map)
-            if assigned_port is None:
-                # Rollback already allocated ports on failure
-                self.release_ports(agent_id)
-                raise PortError(
-                    f"Port pool exhausted for category '{category}' (Range: {p_range.start}-{p_range.end})."
-                )
-            
-            # Record allocation in state
-            self.state.allocate_port(assigned_port, agent_id)
-            allocated_map[str(assigned_port)] = agent_id
-            allocated_ports_for_this_agent[category] = assigned_port
+            for category, p_range in self.config.port_ranges.items():
+                assigned_port = self._find_available_port(p_range, allocated_map)
+                if assigned_port is None:
+                    # Rollback already allocated ports on failure
+                    self.release_ports(agent_id)
+                    raise PortError(
+                        f"Port pool exhausted for category '{category}' (Range: {p_range.start}-{p_range.end})."
+                    )
 
-        return allocated_ports_for_this_agent
+                # Record allocation in state
+                self.state.allocate_port(assigned_port, agent_id)
+                allocated_map[str(assigned_port)] = agent_id
+                allocated_ports_for_this_agent[category] = assigned_port
+
+            return allocated_ports_for_this_agent
 
     def _find_available_port(
         self,

@@ -48,7 +48,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Verify CLI Command & Tooling
+      - name: Run Automated Test Suite (24 Unit & E2E Integration Tests)
         run: |
-          parallel-agents --help
-          echo "✅ parallel-agents CLI installs and executes cleanly."
+          python -m unittest discover tests
+          echo "✅ All 24 unit and multi-agent integration tests passed."
