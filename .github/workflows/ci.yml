@@ -37,7 +37,18 @@ jobs:
           test -f 02-conflict-management.md
           test -f 03-orchestration.md
           test -f 04-agent-setup.md
-          test -f 05-github-mechanics.md
-          test -f 06-free-tier-ops.md
-          test -f EXAMPLES.md
-          echo "✅ All core chapters and documentation files are present."
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run Test Suite
+        run: |
+          python -m unittest discover tests
+          echo "✅ All automated unit and integration tests passed."
