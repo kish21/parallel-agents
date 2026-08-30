@@ -120,6 +120,16 @@ class StateManager:
                 return True
             return False
 
+    def allocate_next_agent_id(self) -> str:
+        """Atomically finds and reserves the next sequential agent ID under the state lock."""
+        with self.lock():
+            data = self._read_json(self.agents_file)
+            existing_ids = set(data.keys())
+            idx = 1
+            while f"agent-{idx:03d}" in existing_ids:
+                idx += 1
+            return f"agent-{idx:03d}"
+
     def get_allocated_ports(self) -> Dict[str, str]:
         """Returns map of port_number (str) -> agent_id."""
         with self.lock():
@@ -130,6 +140,14 @@ class StateManager:
         with self.lock():
             data = self._read_json(self.ports_file)
             data[str(port)] = agent_id
+            self._write_json(self.ports_file, data)
+
+    def allocate_ports_atomic(self, port_map: Dict[int, str]) -> None:
+        """Atomically records multiple port allocations in a single disk write under the lock."""
+        with self.lock():
+            data = self._read_json(self.ports_file)
+            for port, agent_id in port_map.items():
+                data[str(port)] = agent_id
             self._write_json(self.ports_file, data)
 
     def release_ports_for_agent(self, agent_id: str) -> List[int]:

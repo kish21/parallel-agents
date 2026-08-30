@@ -123,6 +123,54 @@ class TestConcurrency(unittest.TestCase):
         self.assertEqual(len(state_mgr.list_agents()), 0)
         self.assertEqual(len(state_mgr.get_allocated_ports()), 0)
 
+    def test_concurrent_stress_10_agents(self):
+        """Stress tests 10 simultaneous worker spawns in parallel."""
+        cmd_init(argparse.Namespace(name="Stress10App", force=False))
+        cfg = generate_default_config("Stress10App")
+        cfg.max_agents = 12
+        save_config(cfg, self.root)
+
+        spawn_configs = [
+            (f"stress-worker-{i}", "backend" if i % 2 == 0 else "frontend", f"Task {i}", "JR1")
+            for i in range(1, 11)
+        ]
+
+        def spawn_agent(config_tuple):
+            name, lane, task, seat = config_tuple
+            args = argparse.Namespace(name=name, lane=lane, task=task, seat=seat, command=None, env=[], force=False)
+            return cmd_spawn(args)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(spawn_agent, spawn_configs))
+
+        for r in results:
+            self.assertEqual(r, 0)
+
+        state_mgr = StateManager(self.root)
+        agents = state_mgr.list_agents()
+        self.assertEqual(len(agents), 10)
+
+        # Assert 10 unique IDs, 10 unique worktrees, 10 unique branches, 10 unique port sets
+        ids = [a.id for a in agents]
+        wts = [a.worktree_path for a in agents]
+        branches = [a.branch for a in agents]
+        be_ports = [a.ports["backend"] for a in agents]
+
+        self.assertEqual(len(set(ids)), 10)
+        self.assertEqual(len(set(wts)), 10)
+        self.assertEqual(len(set(branches)), 10)
+        self.assertEqual(len(set(be_ports)), 10)
+
+        # Concurrent Cleanup of all 10
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            cleanup_results = list(executor.map(lambda a_id: cmd_cleanup(argparse.Namespace(agent=a_id, force=True)), ids))
+
+        for cr in cleanup_results:
+            self.assertEqual(cr, 0)
+
+        self.assertEqual(len(state_mgr.list_agents()), 0)
+        self.assertEqual(len(state_mgr.get_allocated_ports()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

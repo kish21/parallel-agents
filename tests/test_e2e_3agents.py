@@ -45,50 +45,29 @@ class TestE2E3Agents(unittest.TestCase):
 
     def tearDown(self):
         os.chdir(self.orig_cwd)
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
-    def test_three_agents_simultaneous_workflow(self):
+    def test_three_agents_concurrent_workflow(self):
         import argparse
+        import concurrent.futures
 
         # 1. Initialize
         init_args = argparse.Namespace(name="MultiAgentApp", force=False)
         self.assertEqual(cmd_init(init_args), 0)
 
-        # 2. Spawn Agent 1 (Backend - SR1)
-        spawn_1 = argparse.Namespace(
-            name="backend-agent",
-            lane="backend",
-            task="Build Auth API",
-            seat="SR1",
-            command=None,
-            env=[],
-            force=False,
-        )
-        self.assertEqual(cmd_spawn(spawn_1), 0)
+        # 2. Concurrently spawn 3 agents simultaneously
+        spawn_requests = [
+            argparse.Namespace(name="backend-agent", lane="backend", task="Build Auth API", seat="SR1", command=None, env=[], force=False),
+            argparse.Namespace(name="frontend-agent", lane="frontend", task="Build Login UI", seat="JR1", command=None, env=[], force=False),
+            argparse.Namespace(name="service-agent", lane="backend", task="Build Stripe Webhook", seat="JR2", command=None, env=[], force=False),
+        ]
 
-        # 3. Spawn Agent 2 (Frontend - JR1)
-        spawn_2 = argparse.Namespace(
-            name="frontend-agent",
-            lane="frontend",
-            task="Build Login UI",
-            seat="JR1",
-            command=None,
-            env=[],
-            force=False,
-        )
-        self.assertEqual(cmd_spawn(spawn_2), 0)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            spawn_results = list(executor.map(cmd_spawn, spawn_requests))
 
-        # 4. Spawn Agent 3 (Backend/Tests - JR2)
-        spawn_3 = argparse.Namespace(
-            name="service-agent",
-            lane="backend",
-            task="Build Stripe Webhook",
-            seat="JR2",
-            command=None,
-            env=[],
-            force=False,
-        )
-        self.assertEqual(cmd_spawn(spawn_3), 0)
+        for res in spawn_results:
+            self.assertEqual(res, 0)
 
         # Verify state
         state_mgr = StateManager(self.root)
@@ -106,18 +85,26 @@ class TestE2E3Agents(unittest.TestCase):
         for wt in wt_paths:
             self.assertTrue(wt.exists())
 
+        agent_1 = state_mgr.get_agent("backend-agent")
+        agent_2 = state_mgr.get_agent("frontend-agent")
+        agent_3 = state_mgr.get_agent("service-agent")
+
+        wt_1 = Path(agent_1.worktree_path)
+        wt_2 = Path(agent_2.worktree_path)
+        wt_3 = Path(agent_3.worktree_path)
+
         # 5. Concurrent In-Lane Modifications
         # Agent 1 (Backend) modifies backend/auth.py
-        (wt_paths[0] / "backend").mkdir(parents=True, exist_ok=True)
-        (wt_paths[0] / "backend" / "auth.py").write_text("def auth(): pass\n", encoding="utf-8")
+        (wt_1 / "backend").mkdir(parents=True, exist_ok=True)
+        (wt_1 / "backend" / "auth.py").write_text("def auth(): pass\n", encoding="utf-8")
 
         # Agent 2 (Frontend) modifies frontend/Login.tsx
-        (wt_paths[1] / "frontend").mkdir(parents=True, exist_ok=True)
-        (wt_paths[1] / "frontend" / "Login.tsx").write_text("export const Login = () => null;\n", encoding="utf-8")
+        (wt_2 / "frontend").mkdir(parents=True, exist_ok=True)
+        (wt_2 / "frontend" / "Login.tsx").write_text("export const Login = () => null;\n", encoding="utf-8")
 
         # Agent 3 (Service) modifies backend/stripe.py
-        (wt_paths[2] / "backend").mkdir(parents=True, exist_ok=True)
-        (wt_paths[2] / "backend" / "stripe.py").write_text("def webhook(): pass\n", encoding="utf-8")
+        (wt_3 / "backend").mkdir(parents=True, exist_ok=True)
+        (wt_3 / "backend" / "stripe.py").write_text("def webhook(): pass\n", encoding="utf-8")
 
         # 6. Validate all 3 agents -> ALL PASS
         val_1 = argparse.Namespace(agent="backend-agent", json=False)
@@ -129,8 +116,8 @@ class TestE2E3Agents(unittest.TestCase):
         self.assertEqual(cmd_validate(val_3), 0)
 
         # 7. Deliberately introduce cross-lane violation: Agent 1 touches Frontend
-        (wt_paths[0] / "frontend").mkdir(parents=True, exist_ok=True)
-        (wt_paths[0] / "frontend" / "App.tsx").write_text("corrupted", encoding="utf-8")
+        (wt_1 / "frontend").mkdir(parents=True, exist_ok=True)
+        (wt_1 / "frontend" / "App.tsx").write_text("corrupted", encoding="utf-8")
 
         # Validation must REJECT Agent 1 with exit code 2
         self.assertEqual(cmd_validate(val_1), 2)

@@ -146,14 +146,11 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             print(f"❌ Max concurrent agents reached ({config.max_agents}). Use --force or stop an existing agent.", file=sys.stderr)
             return 1
 
-        # Generate sequential ID
-        existing_ids = {a.id for a in state_mgr.list_agents()}
-        idx = 1
-        while f"agent-{idx:03d}" in existing_ids:
-            idx += 1
-        agent_id = f"agent-{idx:03d}"
+        # Atomically generate next sequential ID under lock
+        agent_id = state_mgr.allocate_next_agent_id()
+        idx_str = agent_id.split("-")[-1]
 
-        name = args.name or f"worker-{idx}"
+        name = args.name or f"worker-{int(idx_str)}"
         lane = args.lane
         task = args.task or "General development"
         seat = args.seat or ("SR1" if "senior" in name.lower() else "JR1")
