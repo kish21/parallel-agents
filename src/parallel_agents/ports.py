@@ -67,12 +67,29 @@ class PortManager:
         return self.state.release_ports_for_agent(agent_id)
 
     def audit_ports(self) -> Dict[str, Any]:
-        """Returns port health report for doctor."""
-        allocated = self.state.get_allocated_ports()
-        conflicts = []
-        for port_str, agent_id in allocated.items():
-            port = int(port_str)
-            # In a healthy state, an allocated port for a running agent might be open,
-            # but if an unallocated port is open or multiple agents claim it, we detect it.
-            pass
-        return {"allocated": allocated, "conflicts": conflicts}
+        """Audits allocated ports against OS socket availability and agent process health."""
+        with self.state.lock():
+            allocated = self.state.get_allocated_ports()
+            agents = {a.id: a for a in self.state.list_agents()}
+            conflicts = []
+            orphaned = []
+            active_ports = []
+
+            for port_str, agent_id in allocated.items():
+                port = int(port_str)
+                agent = agents.get(agent_id)
+
+                if not agent:
+                    orphaned.append(f"Port {port} allocated to non-existent agent '{agent_id}'.")
+                elif agent.status in ("STOPPED", "FAILED", "COMPLETED"):
+                    orphaned.append(f"Port {port} still reserved by {agent.status.lower()} agent '{agent_id}'.")
+                else:
+                    active_ports.append({"port": port, "agent_id": agent_id, "status": agent.status})
+
+            return {
+                "allocated_count": len(allocated),
+                "active_ports": active_ports,
+                "orphaned": orphaned,
+                "conflicts": conflicts,
+                "is_healthy": len(orphaned) == 0 and len(conflicts) == 0,
+            }

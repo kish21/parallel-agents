@@ -119,20 +119,15 @@ class Doctor:
 
         # 4. Port Allocations & Conflicts Check
         port_mgr = PortManager(cfg, self.state)
-        allocated_ports = self.state.get_allocated_ports()
-        port_problems = []
-
-        agent_map = {a.id: a for a in agents}
-        for port_str, assigned_agent in allocated_ports.items():
-            if assigned_agent not in agent_map:
-                port_problems.append(f"Port {port_str} reserved by non-existent agent '{assigned_agent}'.")
+        port_audit = port_mgr.audit_ports()
+        port_problems = port_audit.get("orphaned", []) + port_audit.get("conflicts", [])
 
         if not port_problems:
             report.checks.append(
                 DiagnosticCheck(
                     name="Port allocations",
                     passed=True,
-                    message=f"{len(allocated_ports)} ports allocated cleanly.",
+                    message=f"{port_audit.get('allocated_count', 0)} ports allocated cleanly.",
                 )
             )
         else:
