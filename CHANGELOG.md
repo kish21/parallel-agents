@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `05-github-mechanics.md`: Board single-select fields (`Lane`, `Seat`, `Owner`), disjoint milestones, sub-issues, and single-account routing.
   - `06-free-tier-ops.md`: Public vs. private repository matrix, verified mirror sync scripts, divergence checkers, and CI minute optimizations.
 - **Scaffolding & Tooling**:
+  - **`parallel-agents` Python CLI (`src/parallel_agents/`)**: Turnkey tool implementing `init`, `doctor`, `spawn`, `status`, `diff`, `validate`, `inspect`, `logs`, `stop`, `restart`, `repair`, and `cleanup`.
+  - **Automated Worktree & Branch Manager**: Automatically provisions worktrees (`.parallel-agents/worktrees/`) on deterministic branches (`parallel/<agent-id>/<task>`).
+  - **Mechanical Lane Path Engine**: Glob-based `allow`/`deny` validator that fails with non-zero exit codes if an agent touches out-of-lane files.
+  - **Collision-Free Port Allocator**: Provisions non-conflicting port pairs and injects them into isolated `.env` and `.lane` files.
+  - **Diagnostics & Recovery**: Self-repair and health diagnostic suite (`doctor` and `repair`).
   - `bootstrap.sh` & `bootstrap.conf.example`: Automated idempotent script to create GitHub Project boards, fields, standard labels, and milestones in < 30 seconds.
   - `templates/pull_request_template.md`: PR template with mandatory gate execution declaration and lane verification.
   - `templates/issue-template-task.yml` & `templates/issue-template-bug.yml`: GitHub Issue forms for lane-partitioned tasks and defects.
@@ -25,5 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `templates/git-hooks/`: Pre-push test verification gate and pre-commit secret/env leak blocker.
   - `templates/dot-lane.example`: Local checkout seat configuration file.
   - `templates/gitattributes`: Union merge rules for generated indexes and registries.
+- **Automated Test Suite (`tests/`)**:
+  - Unit tests for lane path matching (`tests/test_lanes.py`), port allocation (`tests/test_ports.py`), and end-to-end multi-agent isolation lifecycle in temporary git repositories (`tests/test_e2e.py`).
 - **Documentation**:
-  - `README.md`: 5-minute replication quickstart guide and project overview.
+  - `README.md`: Story-driven quickstart guide, who this is for, and CLI command reference.
+  - `EXAMPLES.md`: Full end-to-end walkthrough of Ticket #102.
+  - `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`: Open-source community guidelines.
