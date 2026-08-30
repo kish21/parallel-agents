@@ -34,6 +34,8 @@ class WorktreeManager:
                 ["git", "rev-parse", "--show-toplevel"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
             )
             return Path(res.stdout.strip())
@@ -53,6 +55,8 @@ class WorktreeManager:
                 cwd=target_cwd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=check,
             )
         except subprocess.CalledProcessError as e:
@@ -179,9 +183,9 @@ class WorktreeManager:
         )
         committed_files = [f.strip() for f in diff_res.stdout.splitlines() if f.strip()]
 
-        # 2. Uncommitted & untracked working tree changes
+        # 2. Uncommitted & untracked working tree changes (use -uall to list all individual files)
         status_res = self._run_git(
-            ["status", "--porcelain"],
+            ["status", "--porcelain", "-uall"],
             cwd=worktree_path,
             check=False,
         )

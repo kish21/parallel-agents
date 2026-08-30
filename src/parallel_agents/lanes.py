@@ -34,7 +34,7 @@ class LaneEngine:
             path_str = filepath.as_posix()
         else:
             path_str = str(filepath).replace("\\", "/")
-        return path_str.lstrip("/")
+        return path_str.strip("/")
 
     @staticmethod
     def match_glob(path_str: str, pattern: str) -> bool:
