@@ -1,0 +1,47 @@
+name: "Bug Report"
+description: "File a defect or regression with reproducible steps"
+title: "[Bug] Short summary of failure"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 🐛 Defect Report
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Lane
+      options:
+        - interface
+        - service
+        - data
+        - platform
+        - docs/framework
+        - shared — needs a senior call
+    validations:
+      required: true
+
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Severity / Owner
+      options:
+        - junior
+        - senior
+        - unsure — needs a senior call
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened vs. what was expected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / Error Output
+    validations:
+      required: true
