@@ -405,25 +405,26 @@ It is a **lightweight coordination and safety layer** for parallel AI coding age
 
 ## 🧪 Automated Testing & Reliability Benchmarks
 
-Parallel Agents includes a **tracked 30-test unit, integration, concurrency stress, and failure recovery suite** and an automated reproducibility benchmark runner.
+Parallel Agents includes a **tracked 36-test unit, integration, concurrency stress, and failure recovery suite** and an automated reproducibility benchmark runner.
 
 ### 1. Run the Full Test Suite
 ```bash
 python -m unittest discover tests
 ```
 ```
-..............................
+....................................
 ----------------------------------------------------------------------
-Ran 30 tests in 35.466s
+Ran 36 tests in 53.175s
 
 OK
 ```
 
 #### What Is Tested & Proven:
-* **True Multi-Process Concurrency & Stress (`test_concurrency.py`)**: Spawns up to 10 agents in parallel threads simultaneously across separate CPU workers to mechanically prove that re-entrant file locking (`StateLock`) assigns unique sequential IDs, dedicated Git worktrees, unique branches, and non-colliding ports atomically with zero lost state.
+* **StateLock Integration (`test_state_lock.py`)**: Validates StateLock mutual exclusion under heavy contention (20 simultaneous threads) with zero state lost or overwritten.
+* **Atomic Concurrency & Stress (`test_concurrency.py`, `test_e2e_concurrent.py`)**: Spawns up to 10 agents in parallel threads simultaneously across separate CPU workers to mechanically prove that re-entrant file locking (`StateLock`) assigns unique sequential IDs, dedicated Git worktrees, unique branches, and non-colliding ports atomically with zero lost state.
 * **Failure Modes & Transactional Rollbacks (`test_failure_modes.py`)**: Validates clean port rollback on port exhaustion, clean rollback when worktree creation fails (simulated disk/git failure), dead process diagnosis and recovery in `repair`, and protection of uncommitted developer code during cleanup.
 * **3-Agent Multi-Lane Workflow (`test_e2e_3agents.py`)**: Concurrently spawns Agent A (Backend), Agent B (Frontend), and Agent C (Service), verifies distinct physical worktrees, dedicated branches, and unique ports (`8001/3001`, `8002/3002`, `8003/3003`), validates in-lane edits (pass), proves deliberate cross-lane violations fail with exit code `2`, and cleanly reclaims all resources.
-* **Port Audit & Conflict Detection (`test_ports.py`, `ports.py`)**: Validates OS socket inspection, active process verification, and detection of orphaned or colliding port reservations.
+* **Port Audit & Conflict Detection (`test_ports.py`, `test_port_audit.py`)**: Validates OS socket inspection, active process verification, and detection of orphaned or colliding port reservations.
 * **Diagnostics & Recovery (`test_doctor.py`, `test_cleanup.py`)**: Validates automatic detection of missing worktrees, orphaned port reclamation, and uncommitted developer code protection.
 
 ---
