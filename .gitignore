@@ -7,6 +7,15 @@ worktrees/
 .env
 .env.*
 !.env.example
+.parallel-agents/
+
+# Tests & Build artifacts (Product focus)
+tests/
+*.egg-info/
+__pycache__/
+*.pyc
+build/
+dist/
 
 # OS & Editor files
 .DS_Store
