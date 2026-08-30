@@ -1,0 +1,5 @@
+# Union merge strategy for auto-generated registry & index files
+# Prevents false git merge conflicts when parallel seats append to lists
+docs/index.md merge=union
+src/registry/index.ts merge=union
+*.generated.* merge=union

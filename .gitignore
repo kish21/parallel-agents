@@ -1,0 +1,15 @@
+# Local, per-repository inputs. The example is the tracked one.
+bootstrap.conf
+
+# Local worktrees & seat configurations
+worktrees/
+.lane
+.env
+.env.*
+!.env.example
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

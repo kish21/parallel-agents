@@ -1,0 +1,9 @@
+# .lane — Per-checkout seat declaration file
+# Copy this file to `.lane` in each worktree/checkout.
+
+SEAT="JR1"
+ROLE="junior"
+ALLOWED_LANES="interface,service"
+FORBIDDEN_LANES="data,platform"
+PORT_FRONTEND="3003"
+PORT_BACKEND="8003"

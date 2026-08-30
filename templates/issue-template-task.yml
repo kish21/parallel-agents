@@ -1,0 +1,55 @@
+name: "Task / Feature"
+description: "File a discrete task or feature for parallel agent execution"
+title: "[Lane] Short description of task"
+labels: ["task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 📋 Parallel Agent Task Definition
+        Fill out this form to ensure clear boundaries across parallel seats.
+
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Lane (Code Path Boundary)
+      description: Which area of the codebase does this ticket modify?
+      options:
+        - interface
+        - service
+        - data
+        - platform
+        - shared — needs a senior call
+    validations:
+      required: true
+
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Seniority Level Required
+      description: Does this touch sensitive logic (auth, migration, billing) or standard UI/CRUD?
+      options:
+        - junior
+        - senior
+        - unsure — needs a senior call
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What needs to be done?
+      description: Clear, unambiguous description of the expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: allowed_paths
+    attributes:
+      label: Allowed File Paths
+      description: List the directories or files this task is permitted to touch.
+      placeholder: |
+        frontend/src/components/
+        frontend/src/pages/
+    validations:
+      required: true

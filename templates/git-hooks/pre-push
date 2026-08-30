@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# pre-push hook: Ensure local test suite passes before pushing to remote
+set -euo pipefail
+
+echo "🛡️  [pre-push] Running local test gate..."
+
+# Adjust to your project's test command (npm test, pytest, cargo test, etc.)
+if command -v npm >/dev/null 2>&1 && [ -f "package.json" ]; then
+  npm test -- --silent
+elif command -v pytest >/dev/null 2>&1; then
+  pytest -q
+fi
+
+echo "✅ [pre-push] All checks passed. Proceeding with push."

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# pre-commit hook: Block accidental commit of secrets or local environment files
+set -euo pipefail
+
+# Check for staged .env or secret files
+FORBIDDEN_PATTERNS=(".env" ".env.local" "*.pem" "*.key" "id_rsa")
+
+for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
+  if git diff --cached --name-only | grep -E "$pattern" >/dev/null 2>&1; then
+    echo "🚨 [pre-commit] Blocked: Attempting to commit sensitive/local file matching '$pattern'!"
+    exit 1
+  fi
+done
+
+exit 0
