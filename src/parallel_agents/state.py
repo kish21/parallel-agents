@@ -87,7 +87,8 @@ class StateManager:
 
     @staticmethod
     def _write_json(path: Path, data: Dict[str, Any]) -> None:
-        temp_path = path.with_suffix(".tmp")
+        import uuid
+        temp_path = path.parent / f"{path.name}.{uuid.uuid4().hex}.tmp"
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         temp_path.replace(path)

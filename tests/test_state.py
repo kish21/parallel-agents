@@ -12,7 +12,8 @@ class TestStateManager(unittest.TestCase):
         self.state_mgr = StateManager(self.root)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_save_and_get_agent(self):
         agent = AgentState(

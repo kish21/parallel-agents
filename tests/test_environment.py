@@ -15,7 +15,8 @@ class TestEnvironmentManager(unittest.TestCase):
         self.env_mgr = EnvironmentManager(self.config)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_setup_environment_files(self):
         agent = AgentState(

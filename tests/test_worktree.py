@@ -23,7 +23,8 @@ class TestWorktreeManager(unittest.TestCase):
         self.wt_mgr = WorktreeManager(self.root)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_branch_name_generation(self):
         branch = self.wt_mgr.make_branch_name("agent-001", "Add Stripe Webhook")

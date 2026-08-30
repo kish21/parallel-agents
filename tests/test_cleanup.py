@@ -27,7 +27,8 @@ class TestCleanup(unittest.TestCase):
         self.port_mgr = PortManager(self.config, self.state_mgr)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_cleanup_deletes_worktree_and_reclaims_ports(self):
         branch = self.wt_mgr.make_branch_name("agent-001", "Task 1")
