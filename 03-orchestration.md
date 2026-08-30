@@ -112,3 +112,37 @@ Every pull request follows this deterministic decision tree:
 > [!IMPORTANT]
 > **Swap vendors ONLY at ticket boundaries.**
 > Never swap an AI model in the middle of a half-finished ticket. A half-completed branch holds architectural context inside the active conversation window. Swapping mid-stream forces the new agent to guess previous design choices, creating phantom bugs. Finish or reset the ticket first.
+
+---
+
+## 6. Measuring ROI & Parallel Velocity (The 4 KPIs)
+
+To ensure that running 4–6 parallel seats is producing real engineering throughput rather than PR review fatigue, track these 4 core metrics:
+
+```
+┌───────────────────────────────┬───────────────────────────────┐
+│ 1. Throughput Scaling Factor  │ 2. Merge Conflict Frequency   │
+│ Target: > 3.2x across 4 seats │ Target: < 2% of merged PRs    │
+├───────────────────────────────┼───────────────────────────────┤
+│ 3. Gate First-Pass Ratio      │ 4. PR Review Cycle Time       │
+│ Target: > 85% clean passes    │ Target: < 30 min per review   │
+└───────────────────────────────┴───────────────────────────────┘
+```
+
+### 1. Throughput Scaling Factor
+* **Formula**: $\frac{\text{Weekly Merged Tasks (4 Seats)}}{\text{Baseline 1-Developer Velocity}}$
+* **Benchmark**: 
+  * 4 Seats: Target **3.2x – 3.6x**. (A sub-2.5x ratio indicates lane overlap or review bottlenecks).
+
+### 2. Merge Conflict Frequency
+* **Formula**: $\frac{\text{PRs Hitting Merge Conflicts}}{\text{Total Merged PRs}} \times 100\%$
+* **Benchmark**: Must remain **under 2%**. If this exceeds 5%, file paths are not cleanly partitioned in `.lane`.
+
+### 3. Gate First-Pass Ratio
+* **Formula**: $\frac{\text{PRs with Passing Gate on First Submit}}{\text{Total PRs Opened}} \times 100\%$
+* **Benchmark**: Target **> 85%**. A drop below 70% indicates that a seat's capability card needs to be downgraded from `native` to `author-required`.
+
+### 4. PR Review Cycle Time
+* **Formula**: $\text{Time from PR Open} \rightarrow \text{Senior Merge}$
+* **Benchmark**: Target **under 30 minutes**. Because PRs are path-isolated and carry gate declarations, senior review is a verification pass, not a line-by-line rewrite.
+

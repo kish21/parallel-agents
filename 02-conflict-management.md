@@ -147,3 +147,59 @@ When a human developer or tester is manually verifying a feature in a running ch
 1. **Never write files or switch branches in that checkout.**
 2. Dev servers with hot-module reload (HMR) will immediately restart the app, wiping the human's in-progress state or form inputs.
 3. If an agent needs to make fixes, it must make them on its own seat's worktree/branch, run tests, and only notify the human when ready for a fresh pull.
+
+---
+
+## 6. Disaster Recovery Runbook (When an Agent Goes Off the Rails)
+
+Even with strong rules, agents will occasionally hallucinate dependencies, touch forbidden paths, or leave hung background processes. Use these fast rollback recipes:
+
+### Scenario A: Agent Corrupted Its Worktree
+If an agent created messy untracked files, broken build caches, or bad dependency installations:
+
+```bash
+# In the corrupted worktree (e.g. worktrees/jr1)
+git reset --hard HEAD
+git clean -fdx
+git checkout main && git pull origin main
+echo 'SEAT="JR1"' > .lane
+```
+
+### Scenario B: Agent Accidentally Applied Unmerged DB Migrations
+If an agent ran an uncommitted schema change against the shared development database:
+
+```bash
+# 1. Roll back the specific migration using your tool's rollback command
+# Example for Supabase / Prisma:
+supabase db reset
+# or
+npx prisma migrate reset --force
+
+# 2. Re-verify the live schema matches origin/main
+git checkout origin/main -- database/
+```
+
+### Scenario C: Agent Modified Files Outside Its Lane
+If an agent generated a PR with 15 files, but 5 belong to forbidden lanes:
+
+```bash
+# Checkout the PR branch
+git checkout feat/my-branch
+
+# Restore forbidden files back to main's state
+git checkout origin/main -- frontend/src/shared/central_config.ts
+git commit -m "fix: revert out-of-lane changes"
+git push origin feat/my-branch
+```
+
+### Scenario D: Zombie Process / Port Clash
+If an agent session died but left port 8003 or 3003 blocked:
+
+```bash
+# Linux / macOS:
+lsof -ti :8003 | xargs kill -9
+
+# Windows (PowerShell):
+Get-Process -Id (Get-NetTCPConnection -LocalPort 8003).OwningProcess | Stop-Process -Force
+```
+

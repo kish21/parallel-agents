@@ -148,12 +148,13 @@ Your agents will now pick tickets assigned to their seat, work strictly inside t
 
 | Chapter | Topic | What It Teaches |
 | :--- | :--- | :--- |
-| **[01. Working Agreement](01-working-agreement.md)** | **Quality Bar & Contracts** | Definition-of-Done checklist, path boundary contracts, security rules, and merge discipline ("never merge without the owner"). |
-| **[02. Conflict Management](02-conflict-management.md)** | **Isolation & Migrations** | 4-seat port table, worktrees vs. separate clones, ticket-based migration IDs, and resolving shared index conflicts. |
-| **[03. Orchestration](03-orchestration.md)** | **Capability Cards & Scaling** | The 3-state capability model (`native` / `author-required` / `unavailable`), scaling 2→4→6 seats, and review chains. |
+| **[01. Working Agreement](01-working-agreement.md)** | **Quality Bar & Contracts** | Definition-of-Done checklist, path boundary contracts, security rules, and merge discipline. |
+| **[02. Conflict Management](02-conflict-management.md)** | **Isolation & Recovery** | 4-seat port table, worktrees, migration IDs, index union merges, and the **Disaster Recovery Runbook**. |
+| **[03. Orchestration](03-orchestration.md)** | **Capabilities & Metrics** | 3-state capability model, scaling 2→4→6 seats, review chains, and **Parallel Velocity ROI Metrics**. |
 | **[04. Per-Agent Setup](04-agent-setup.md)** | **Prompts & Session Hygiene** | Copy-paste prompt templates for Senior and Junior seats; controlling context token runaway. |
 | **[05. GitHub Mechanics](05-github-mechanics.md)** | **Board & Issue Routing** | Board single-select fields, disjoint milestones, sub-issues, and single-account routing. |
 | **[06. Free-Tier Operations](06-free-tier-ops.md)** | **CI & Verified Mirror** | Public vs. private trade-offs, divergence check scripts, and optimizing CI allowances per seat. |
+| **[🎬 End-to-End Walkthrough](EXAMPLES.md)** | **Ticket #102 Lifecycle** | Trace a real ticket from assignment → `.lane` check → worktree dev → PR gate declaration → senior merge. |
 
 ---
 
@@ -162,9 +163,10 @@ Your agents will now pick tickets assigned to their seat, work strictly inside t
 ```
 parallel-agents/
 ├── README.md                  # The Story, Concepts & 5-Minute Quickstart
+├── EXAMPLES.md                # End-to-End Walkthrough of Ticket #102
 ├── 01-working-agreement.md     # Quality Bar & Definition-of-Done
-├── 02-conflict-management.md   # Port Allocation & Collision Prevention
-├── 03-orchestration.md         # Capability Cards & Scaling Patterns
+├── 02-conflict-management.md   # Port Isolation & Disaster Recovery Runbook
+├── 03-orchestration.md         # Capability Cards & Parallel ROI Metrics
 ├── 04-agent-setup.md          # Agent Prompts & Token Cost Control
 ├── 05-github-mechanics.md     # GitHub Board & Issue Routing
 ├── 06-free-tier-ops.md        # CI Minute Optimization & Verified Mirror
