@@ -17,47 +17,97 @@ To run 4 seats simultaneously without conflict, assign deterministic ports and i
 
 ---
 
-## 1. Worktrees vs. Separate Clones
+## 1. What is a Git Worktree? (How It Works Under the Hood)
 
-You can isolate agents using either **Git Worktrees** or **Separate Clones**. Both have clear trade-offs:
+If you have only used standard Git, you are accustomed to **one repository folder holding exactly one checked-out branch at a time**. Switching branches swaps the files in place.
+
+A **Git Worktree** allows a single repository (`.git`) to project **multiple simultaneous working folders on your disk at the same time, each checked out to a completely different branch**.
 
 ```
-GIT WORKTREES (Shared Git Directory)        SEPARATE CLONES (Complete Isolation)
-      ┌─────────────┐                            ┌───────────┐  ┌───────────┐
-      │ .git (Root) │                            │ Clone SR1 │  │ Clone JR1 │
-      └──┬───────┬──┘                            │   .git    │  │   .git    │
-         │       │                               └───────────┘  └───────────┘
-   ┌─────▼─┐   ┌─▼─────┐                          • Pro: Zero shared state (stashes,
-   │  SR1  │   │  JR1  │                            locks, refs).
-   └───────┘   └───────┘                          • Con: Uses more disk space; 
-   • Pro: Fast, shared commit cache.                requires independent fetches.
-   • Con: Stash and branch locks are shared.
+                           SINGLE LOCAL REPOSITORY (.git)
+                                   ┌─────────────┐
+                                   │ .git folder │
+                                   │ (All commit │
+                                   │  database)  │
+                                   └──┬───────┬──┘
+                                      │       │
+                Linked Worktree 1     │       │     Linked Worktree 2
+             ┌────────────────────────┘       └────────────────────────┐
+             ▼                                                         ▼
+     ┌───────────────┐                                         ┌───────────────┐
+     │ worktrees/sr1 │                                         │ worktrees/jr1 │
+     │ Branch: sr1   │                                         │ Branch: jr1   │
+     │ Port: 8001    │                                         │ Port: 8003    │
+     │ Full files on │                                         │ Full files on │
+     │ disk for SR1  │                                         │ disk for JR1  │
+     └───────────────┘                                         └───────────────┘
 ```
 
-### Option A: Git Worktree Setup (Recommended for Local Dev)
+---
 
-Run this copyable bash script from the repository root to create 4 isolated worktrees:
+### Why Worktrees Are Superior to `git clone` for Parallel Agents
+
+| Feature | Standard `git clone` (4 Copies) | `git worktree` (1 Repo, 4 Worktrees) |
+| :--- | :--- | :--- |
+| **Creation Time** | Slow (Minutes to download/copy entire history) | **Instant (< 1 second)** |
+| **Disk Space** | Multiplies size by 4x (`.git` copied 4 times) | **Lean (1 shared `.git` commit database)** |
+| **Branch Sharing** | Must `push` to GitHub and `pull` across clones | **Instant (Rebase local branches with zero network lag)** |
+| **File Isolation** | Completely separate physical folders | **Completely separate physical folders** |
+
+---
+
+### Step-by-Step: Managing Worktrees in Practice
+
+#### 1. Create Worktrees for Your 4 Seats
+Run this from your repository root. It creates 4 independent folders inside `./worktrees/`, each checked out to its own seat branch:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-# 1. Ensure worktrees directory exists
+# 1. Ensure worktrees parent folder exists
 mkdir -p worktrees
 
-# 2. Add worktree for each seat on its own branch
+# 2. Add worktree for each seat with its own branch
 git worktree add worktrees/sr1 -b seat/sr1
 git worktree add worktrees/sr2 -b seat/sr2
 git worktree add worktrees/jr1 -b seat/jr1
 git worktree add worktrees/jr2 -b seat/jr2
 
-# 3. Create .lane marker file in each worktree
-echo "SEAT=SR1" > worktrees/sr1/.lane
-echo "SEAT=SR2" > worktrees/sr2/.lane
-echo "SEAT=JR1" > worktrees/jr1/.lane
-echo "SEAT=JR2" > worktrees/jr2/.lane
+# 3. Create the .lane marker in each folder so agents know their seat
+echo 'SEAT="SR1"' > worktrees/sr1/.lane
+echo 'SEAT="SR2"' > worktrees/sr2/.lane
+echo 'SEAT="JR1"' > worktrees/jr1/.lane
+echo 'SEAT="JR2"' > worktrees/jr2/.lane
+```
 
-echo "✅ 4 seats initialized in ./worktrees/"
+#### 2. Inspect Active Worktrees
+To see all connected worktrees, their physical paths, and active branches:
+
+```bash
+$ git worktree list
+/Users/dev/my-project             5a39e87 [main]
+/Users/dev/my-project/worktrees/sr1  5a39e87 [seat/sr1]
+/Users/dev/my-project/worktrees/sr2  5a39e87 [seat/sr2]
+/Users/dev/my-project/worktrees/jr1  5a39e87 [seat/jr1]
+/Users/dev/my-project/worktrees/jr2  5a39e87 [seat/jr2]
+```
+
+#### 3. How Files Exist on Disk
+Inside each worktree folder (`worktrees/jr1`), you have a complete working tree of all project files. 
+
+Instead of a heavy `.git/` directory, there is a tiny single-line `.git` file that tells Git:
+```
+gitdir: /Users/dev/my-project/.git/worktrees/jr1
+```
+Agents can run `npm install`, compile assets, start dev servers, and run test suites in `worktrees/jr1` without affecting `worktrees/sr1` in any way!
+
+#### 4. Removing / Cleaning a Worktree
+When a seat or feature branch is retired:
+
+```bash
+# Remove the worktree folder and unlink it from git
+git worktree remove worktrees/jr1
+
+# Clean up any stale worktree metadata
+git worktree prune
 ```
 
 > [!CAUTION]
