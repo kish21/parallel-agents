@@ -1,0 +1,2 @@
+[console_scripts]
+parallel-agents = parallel_agents.cli:main

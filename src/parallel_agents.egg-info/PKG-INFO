@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: parallel-agents
+Version: 0.1.0
+Summary: Mechanical Safety & Coordination Tool for Running Parallel AI Coding Agents
+Author: Parallel Agents Contributors
+License: MIT
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pyyaml>=6.0
+Dynamic: license-file
+
 # Parallel Agents ⚡
 
 [![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](CHANGELOG.md)
@@ -81,96 +93,66 @@ This framework is built for developers and engineering leaders looking to scale 
 
 ---
 
-## 🚀 Quickstart: Running Parallel Agents via CLI
+## 🚀 Step-by-Step: From Zero to Parallel in 5 Minutes
 
-The `parallel-agents` CLI automates worktree creation, branch naming, port allocation, and mechanical lane validation in seconds.
+Follow these 4 steps to set up your repository for parallel agents:
 
-### 1. Install & Initialize
+### Step 1: Bootstrap Your GitHub Delivery Board
+Instead of configuring project boards by hand, use the automated setup script to create custom single-select fields (`Lane`, `Seat`, `Owner`), status columns, standard labels, and disjoint milestones in under 30 seconds:
+
 ```bash
-# 1. Install parallel-agents
-pip install -e .
+# 1. Copy the example config and add your repo name
+cp bootstrap.conf.example bootstrap.conf
 
-# 2. Initialize in your Git repository
-parallel-agents init
-
-# 3. Check environment health
-parallel-agents doctor
+# 2. Run the bootstrap script
+./bootstrap.sh
 ```
 
 ---
 
-### 2. Spawn Isolated Agents
-Spawn independent agent worktrees with dedicated ports on deterministic branches:
+### Step 2: Spin Up Isolated Worktrees & Seats
+Never let agents share one working directory or fight over git branches. Create isolated git worktrees with dedicated ports:
 
 ```bash
-# Spawn Senior Backend Agent (Allocates port 8001 / 3001)
-parallel-agents spawn --name backend-1 --lane backend --task "Implement authentication" --seat SR1
+# 1. Create worktrees directory and 4 seats
+mkdir -p worktrees
+git worktree add worktrees/sr1 -b seat/sr1
+git worktree add worktrees/sr2 -b seat/sr2
+git worktree add worktrees/jr1 -b seat/jr1
+git worktree add worktrees/jr2 -b seat/jr2
 
-# Spawn Junior Frontend Agent (Allocates port 8002 / 3002)
-parallel-agents spawn --name frontend-1 --lane frontend --task "Build login UI" --seat JR1
+# 2. Drop the .lane seat identifier into each checkout
+echo 'SEAT="SR1"' > worktrees/sr1/.lane
+echo 'SEAT="SR2"' > worktrees/sr2/.lane
+echo 'SEAT="JR1"' > worktrees/jr1/.lane
+echo 'SEAT="JR2"' > worktrees/jr2/.lane
 ```
 
 ---
 
-### 3. Monitor Active Agents
-View all active worktrees, branches, lanes, and ports:
+### Step 3: Drop In Quality Gates & Merge Rules
+Copy the ready-to-use PR template (with mandatory test execution declarations), issue forms, and union-merge git attributes:
 
 ```bash
-$ parallel-agents status
+# 1. Copy GitHub Issue and PR templates
+mkdir -p .github/ISSUE_TEMPLATE
+cp templates/pull_request_template.md .github/
+cp templates/issue-template-task.yml .github/ISSUE_TEMPLATE/
+cp templates/issue-template-bug.yml .github/ISSUE_TEMPLATE/
 
-📋 PARALLEL AGENTS — MY-PROJECT
-
-Agent ID     Name           Seat   Lane         Status     Ports            Task
-----------------------------------------------------------------------------------------------------
-agent-001    backend-1      SR1    backend      RUNNING    8001/3001        Implement authentication
-agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Build login UI
+# 2. Enable union merging for shared index files
+cp templates/gitattributes .gitattributes
 ```
 
 ---
 
-### 4. Mechanically Validate Changes (Never Trust Blindly)
-Before submitting or merging a PR, mechanically check that the agent touched only allowed files in its lane and passed all quality tests:
+### Step 4: Launch Your Agent Sessions
+Open an agent session in each worktree and paste the lightweight, non-rotting role prompt:
 
-```bash
-$ parallel-agents validate agent-001
+* **In `worktrees/sr1` & `sr2` (Senior Seats)**: Paste the prompt from [`04-agent-setup.md §2`](04-agent-setup.md#2-drop-in-prompt-senior--lead-agent-sr1--sr2).
+* **In `worktrees/jr1` & `jr2` (Junior Seats)**: Paste the prompt from [`04-agent-setup.md §3`](04-agent-setup.md#3-drop-in-prompt-junior-agent-jr1--jr2).
 
-🛡️ VALIDATION REPORT: backend-1 (agent-001)
-Lane: backend
-
-  [Lane Compliance]
-    ✓ All 4 changed files are within allowed lane paths.
-
-==================================================
-✅ VALIDATION PASSED: PR is safe to submit and merge.
-```
-
----
-
-### 5. Safe Cleanup
-When work is merged, release allocated ports and remove the worktree (protects uncommitted changes by default):
-
-```bash
-parallel-agents cleanup agent-001
-```
-
----
-
-## 🛠️ CLI Command Reference
-
-| Command | Purpose |
-| :--- | :--- |
-| **`parallel-agents init`** | Detects repository and creates `.parallel-agents/config.yaml` & directories. |
-| **`parallel-agents doctor`** | Diagnoses Git state, worktree integrity, and detects port conflicts. |
-| **`parallel-agents spawn`** | Automatically creates an isolated worktree, branch, `.env`, `.lane`, and allocates ports. |
-| **`parallel-agents status`** | Displays active agents, seats, lanes, and allocated ports (supports `--json`). |
-| **`parallel-agents validate`** | Mechanically validates lane path compliance and runs configured test commands. |
-| **`parallel-agents diff`** | Shows modified files categorized into `[LANE OK]` vs. `[OUT-OF-LANE]`. |
-| **`parallel-agents inspect`** | Displays detailed metadata, allocated ports, and environment variables for an agent. |
-| **`parallel-agents logs`** | Tails structured execution logs for an agent session. |
-| **`parallel-agents stop`** | Gracefully terminates an agent process. |
-| **`parallel-agents restart`** | Restarts an agent process in its worktree. |
-| **`parallel-agents repair`** | Self-repairs stale process records and cleans orphaned port locks. |
-| **`parallel-agents cleanup`** | Safely removes worktree, releases port reservations, and clears state. |
+Your agents will now pick tickets assigned to their seat, work strictly inside their assigned code lane, and run verification tests on isolated ports.
 
 ---
 
