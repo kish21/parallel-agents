@@ -185,5 +185,15 @@ parallel-agents/
 
 ---
 
+## 🤝 Community & Contributing
+
+Contributions from both human engineers and AI harness operators are warmly welcomed!
+
+* **[Contributing Guide](CONTRIBUTING.md)**: Guidelines for filing issues, creating PRs, and lane-bound workflows.
+* **[Security Policy](SECURITY.md)**: Responsible vulnerability disclosure and agent security best practices.
+* **[Code of Conduct](CODE_OF_CONDUCT.md)**: Contributor Covenant standard.
+
+---
+
 ## License
 [MIT](LICENSE)

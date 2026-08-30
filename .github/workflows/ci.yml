@@ -1,0 +1,43 @@
+name: CI Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Scripts & Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate Shell Scripts Syntax
+        run: |
+          bash -n bootstrap.sh
+          bash -n templates/git-hooks/pre-push
+          bash -n templates/git-hooks/pre-commit
+          echo "✅ All shell scripts have valid syntax."
+
+      - name: Verify Required Files Exist
+        run: |
+          test -f README.md
+          test -f CONTRIBUTING.md
+          test -f SECURITY.md
+          test -f LICENSE
+          test -f CHANGELOG.md
+          test -f VERSION
+          test -f 01-working-agreement.md
+          test -f 02-conflict-management.md
+          test -f 03-orchestration.md
+          test -f 04-agent-setup.md
+          test -f 05-github-mechanics.md
+          test -f 06-free-tier-ops.md
+          test -f EXAMPLES.md
+          echo "✅ All core chapters and documentation files are present."
