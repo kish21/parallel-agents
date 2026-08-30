@@ -3,118 +3,127 @@
 [![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Run 2 to 6 AI coding agents simultaneously on one codebase without merge collisions, port clashes, or rotting prompts.**
+**Run multiple AI coding agents safely in the same repository.**
 
-A practical blueprint, operational guide, and drop-in toolchain for parallel multi-agent software engineering.
-
----
-
-## 📖 The Story: Why This Exists
-
-### The Dream
-You set up 4 AI coding agent subscriptions (or open 4 agent tabs). You assign each a ticket, imagining a 4x boost in engineering velocity. You picture an autonomous software factory building your product in parallel.
-
-### The 24-Hour Reality (The Collision Trap)
-Within hours, the system descends into chaos:
+Parallel Agents gives each coding agent its own Git worktree, branch, ports, environment, and code boundaries, so agents can work at the same time without accidentally interfering with each other.
 
 ```
-                  ┌──────────────┐      ┌──────────────┐
-                  │   Agent 1    │      │   Agent 2    │
-                  │ (Frontend UI)│      │  (Backend)   │
-                  └──────┬───────┘      └──────┬───────┘
-                         │                     │
-                Starts on Port 3000   Hardcodes API to 8000
-                         │                     │
-                         ▼                     ▼
-                  ┌────────────────────────────────────┐
-                  │ 💥 CROSS-TALK: Agent 1's UI tests  │
-                  │ against Agent 2's uncommitted API! │
-                  └────────────────────────────────────┘
-```
-
-1. **The Dev Server Collision**: Agent A starts on port 8000; Agent B auto-increments to 8001. Agent A's browser frontend quietly connects to Agent B's uncommitted backend. You spend 2 hours debugging phantom bugs that only exist because two agents are talking to different code.
-2. **The Database Migration Disaster**: Two agents look at the `migrations/` folder at the same time. Both see `0042_user.sql`, so both name their new file `0043_feature.sql`. When both PRs merge, migrations fail with duplicate keys.
-3. **The Git Merge Gridlock**: Four agents push branches touching shared central files (`index.ts`, `routes.py`, `Makefile`). Instead of writing code, you spend your entire afternoon resolving 3-way merge conflicts.
-4. **The "Rotting Hand-Copied Prompt"**: You paste testing rules into prompt windows. By day three, one agent is running deprecated test commands that measure the wrong metrics, while another agent burns $20 in tokens re-reading massive command logs.
-
-### The Core Realization
-> **Seats are capped by non-overlapping code lanes, not by how many AI subscriptions you own.**
-> 
-> If your codebase has 4 separable code paths, adding a 5th agent produces merge collisions, not a 5th stream of work. Scaling parallel agents requires **physical lane boundaries, deterministic port allocations, and honest capability declarations**.
-
----
-
-## 🎯 Who This Is For
-
-This framework is built for developers and engineering leaders looking to scale AI-driven delivery without drowning in merge conflicts:
-
-* **Solo Founders & Tech Leads ("The 1-Person Software Factory")**: Run 4 parallel AI agents on your product without spending your afternoon fixing crossed-up dev ports or 3-way merge conflicts.
-* **Engineering Leads & CTOs**: Adopt AI coding tools (Claude, Cursor, Copilot, Gemini) with clear guardrails—enforcing code boundaries, security DoD, and mandatory PR quality gates.
-* **Full-Stack Developers**: Level up from single-file "vibe coding" to multi-stream feature engineering across complex full-stack apps.
-* **Agencies & Consultancies**: Deliver client projects faster with repeatable bootstrap tooling (`./bootstrap.sh`) and optimized CI allowances.
-
-| Persona | Primary Goal | The Problem This Solves |
-| :--- | :--- | :--- |
-| **Solo Founders** | 4x development throughput | Eliminates dev server port clashes & merge gridlock |
-| **Engineering Leads** | Safe team-wide AI adoption | Enforces code boundaries, security DoD, and review gates |
-| **Full-Stack Devs** | Multi-stream parallel workflow | Replaces messy git branching with clean, isolated worktrees |
-| **Agencies** | Rapid client delivery | Provides instant, repeatable project bootstrapping in < 30s |
-
----
-
-## 🧩 The 4 Core Ideas Explained Simply
-
-```
-┌───────────────────────────┬───────────────────────────┐
-│ 1. SEAT = SLOT            │ 2. LANE = CODE PATH       │
-│ Seats are permanent       │ Group by directory paths  │
-│ roles (SR1, JR1). Model   │ (interface/, service/),   │
-│ vendors live in a .lane   │ NEVER by broad feature    │
-│ config file.              │ topics.                   │
-├───────────────────────────┼───────────────────────────┤
-│ 3. DECLARE YOUR GATE      │ 4. FORGE-BOUND IDS        │
-│ Weaker models must state  │ Name migrations and files │
-│ what tests they ran in    │ after GitHub ticket IDs   │
-│ the PR before merging.    │ to kill race conditions.  │
-└───────────────────────────┴───────────────────────────┘
+                    Your Repository
+                          │
+             ┌────────────┼────────────┐
+             │            │            │
+             ▼            ▼            ▼
+          Agent 1      Agent 2      Agent 3
+          Backend      Frontend     Tests
+             │            │            │
+          Worktree     Worktree     Worktree
+          Branch       Branch       Branch
+          Port 8001    Port 8002    Port 8003
+             │            │            │
+             └────────────┼────────────┘
+                          ▼
+                      Validate
+                          │
+                          ▼
+                         PRs
 ```
 
 ---
 
-## 🚀 Quickstart: Running Parallel Agents via CLI
+## Why Parallel Agents?
 
-The `parallel-agents` CLI automates worktree creation, branch naming, port allocation, and mechanical lane validation in seconds.
+AI coding agents are powerful, but running several agents in the same repository creates real operational problems:
 
-### 1. Install & Initialize
+* **File Overwrites**: One agent can modify files another agent is actively working on.
+* **Port Clashes**: Two agents can accidentally claim the same development port.
+* **Cross-Talk**: Frontends can connect to another agent's uncommitted backend code.
+* **Migration Conflicts**: Shared database migrations can clash or create duplicate counters.
+* **Out-of-Scope Changes**: An agent can modify central configs, auth, or infrastructure outside its assigned task.
+* **Resource Leaks**: Failed agents can leave behind orphaned processes, blocked ports, or stale git state.
+
+Parallel Agents adds a mechanical coordination and safety layer around your coding agents to prevent these problems.
+
+---
+
+## The Basic Idea
+
+There are four fundamental concepts:
+
+### 1. Agent
+An agent is an isolated worker session assigned to a specific task.
+```
+agent-001 → "Implement user authentication"
+```
+
+### 2. Worktree
+Each agent gets its own physical Git working directory.
+```
+Agent 1 → .parallel-agents/worktrees/agent-001
+Agent 2 → .parallel-agents/worktrees/agent-002
+Agent 3 → .parallel-agents/worktrees/agent-003
+```
+Agents never edit the same physical files simultaneously.
+
+### 3. Lane
+A lane defines which part of the codebase an agent is permitted to touch.
+```yaml
+lane: backend
+
+allow:
+  - src/api/**
+  - src/services/**
+  - tests/api/**
+
+deny:
+  - src/frontend/**
+  - infrastructure/**
+```
+If the backend agent modifies `src/api/users.py`, that is allowed. If it touches `src/frontend/App.tsx`, validation reports a violation.
+
+### 4. Resources
+Each agent receives its own dedicated runtime resources:
+```
+Agent 1 → backend port 8001, frontend port 3001
+Agent 2 → backend port 8002, frontend port 3002
+Agent 3 → backend port 8003, frontend port 3003
+```
+This prevents agents from talking to the wrong development server.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Install
 ```bash
-# 1. Install parallel-agents
 pip install -e .
-
-# 2. Initialize in your Git repository
-parallel-agents init
-
-# 3. Check environment health
-parallel-agents doctor
 ```
 
----
-
-### 2. Spawn Isolated Agents
-Spawn independent agent worktrees with dedicated ports on deterministic branches:
-
+### 2. Initialize the Repository
+From your project root:
 ```bash
-# Spawn Senior Backend Agent (Allocates port 8001 / 3001)
-parallel-agents spawn --name backend-1 --lane backend --task "Implement authentication" --seat SR1
-
-# Spawn Junior Frontend Agent (Allocates port 8002 / 3002)
-parallel-agents spawn --name frontend-1 --lane frontend --task "Build login UI" --seat JR1
+parallel-agents init
 ```
+This creates the `.parallel-agents/` configuration and state directories.
 
----
+### 3. Create an Agent
+```bash
+parallel-agents spawn \
+  --name backend-1 \
+  --lane backend \
+  --task "Implement user authentication"
+```
+Parallel Agents provisions an isolated worktree, branch, and dedicated ports automatically.
 
-### 3. Monitor Active Agents
-View all active worktrees, branches, lanes, and ports:
+### 4. Create Another Agent
+```bash
+parallel-agents spawn \
+  --name frontend-1 \
+  --lane frontend \
+  --task "Build the login interface"
+```
+Now both agents can work simultaneously without collision.
 
+### 5. Check Agents
 ```bash
 $ parallel-agents status
 
@@ -122,15 +131,11 @@ $ parallel-agents status
 
 Agent ID     Name           Seat   Lane         Status     Ports            Task
 ----------------------------------------------------------------------------------------------------
-agent-001    backend-1      SR1    backend      RUNNING    8001/3001        Implement authentication
-agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Build login UI
+agent-001    backend-1      SR1    backend      RUNNING    8001/3001        Implement user authentication
+agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Build the login interface
 ```
 
----
-
-### 4. Mechanically Validate Changes (Never Trust Blindly)
-Before submitting or merging a PR, mechanically check that the agent touched only allowed files in its lane and passed all quality tests:
-
+### 6. Validate an Agent's Work
 ```bash
 $ parallel-agents validate agent-001
 
@@ -144,84 +149,280 @@ Lane: backend
 ✅ VALIDATION PASSED: PR is safe to submit and merge.
 ```
 
----
+### 7. Inspect Changed Files
+```bash
+parallel-agents diff agent-001
+```
 
-### 5. Safe Cleanup
-When work is merged, release allocated ports and remove the worktree (protects uncommitted changes by default):
+### 8. Stop an Agent
+```bash
+parallel-agents stop agent-001
+```
 
+### 9. Clean Up Safely
 ```bash
 parallel-agents cleanup agent-001
 ```
 
 ---
 
-## 🛠️ CLI Command Reference
+## How It Works
+
+```
+WITHOUT PARALLEL AGENTS:                      WITH PARALLEL AGENTS:
+
+Agent A ─────┐                                      Git Repository
+             │                                            │
+Agent B ─────┼── Same working directory     ┌─────────────┼─────────────┐
+             │                              │             │             │
+Agent C ─────┘                              ▼             ▼             ▼
+                                         Agent A       Agent B       Agent C
+             ↓                              │             │             │
+      Conflicts & Leaks                Worktree A    Worktree B    Worktree C
+                                       Branch A      Branch B      Branch C
+                                       Port 8001     Port 8002     Port 8003
+                                            │             │             │
+                                            ▼             ▼             ▼
+                                         Backend       Frontend       Tests
+```
+
+The core difference is **physical isolation**. Agents are not merely prompted to avoid collisions; the tooling physically isolates their files, branches, and ports, and mechanically validates their boundaries.
+
+---
+
+## Lanes
+
+Lanes are how you define architectural ownership boundaries:
+
+```yaml
+lanes:
+  backend:
+    allow:
+      - src/api/**
+      - src/services/**
+      - tests/api/**
+    deny:
+      - src/frontend/**
+
+  frontend:
+    allow:
+      - src/frontend/**
+      - tests/frontend/**
+    deny:
+      - src/api/**
+
+  infrastructure:
+    allow:
+      - infrastructure/**
+      - deployment/**
+```
+
+```
+backend agent        frontend agent        infrastructure agent
+      ↓                     ↓                       ↓
+backend files         frontend files        infrastructure files
+```
+
+The goal is not to isolate every single file—it is to make parallel execution predictable.
+
+---
+
+## Ports
+
+Parallel development servers need independent ports. Instead of hardcoding `8000`:
+
+```
+Agent 1 → Port 8001 / 3001
+Agent 2 → Port 8002 / 3002
+Agent 3 → Port 8003 / 3003
+```
+
+Allocations are deterministic, checked against the host OS socket state, injected into `.env`, and released upon cleanup.
+
+---
+
+## Agent Lifecycle
+
+Agents follow an explicit state machine:
+
+```
+CREATED ──► STARTING ──► RUNNING ──┬──► COMPLETED ──► REVIEW
+                            │      │
+                            │      └──► FAILED ──► REPAIR ──► RUNNING
+                            ▼
+                         STOPPED
+```
+
+Useful commands:
+```bash
+parallel-agents status
+parallel-agents logs backend-1
+parallel-agents stop backend-1
+parallel-agents restart backend-1
+parallel-agents repair backend-1
+parallel-agents cleanup backend-1
+```
+
+---
+
+## Mechanical Validation
+
+Never rely on an AI agent's word that its work is complete. Parallel Agents independently validates:
+
+```bash
+$ parallel-agents validate backend-1
+
+Validation: backend-1
+
+Git
+  ✓ Correct branch
+  ✓ Correct worktree
+
+Policy
+  ✓ All changed files allowed in lane 'backend'
+
+Quality
+  ✓ Tests passed
+  ✓ Lint passed
+  ✓ Typecheck passed
+
+Result: PASS
+```
+
+If an agent touches a forbidden file:
+```
+Validation: backend-1
+
+Policy
+  ✗ Forbidden file modified: src/frontend/App.tsx (Reason: denied)
+
+Result: FAIL (Exit code 2)
+```
+
+---
+
+## Recovery & Diagnostics
+
+If an agent process crashes or an orphaned port is left behind:
+
+```bash
+$ parallel-agents doctor
+
+🩺 PARALLEL AGENTS DOCTOR
+
+  ✓ Git repository: Valid Git repository detected.
+  ✓ Configuration: Valid config.
+  ✓ Worktrees: All worktrees intact.
+  ✗ Port allocations: Port 8001 occupied by dead process.
+  ✓ Agent state
+
+1 problem found.
+```
+
+Run repair to automatically clean up orphaned resources:
+```bash
+parallel-agents repair
+```
+
+---
+
+## Database Isolation
+
+Projects that interact with databases can configure an isolation strategy:
+
+```yaml
+database:
+  strategy: per-agent
+  name_template: "app_${AGENT_ID}"
+```
+
+Resulting databases:
+```
+agent-001 → app_agent_001
+agent-002 → app_agent_002
+agent-003 → app_agent_003
+```
+
+---
+
+## Agent Providers & Adapters
+
+Parallel Agents is provider-independent. It uses a pluggable `AgentAdapter` abstraction:
+
+```
+              Parallel Agents
+                    │
+              Agent Adapter
+                    │
+       ┌────────────┼────────────┐
+       ▼            ▼            ▼
+   Claude CLI    Cursor / IDE   Generic CLI
+```
+
+The orchestration layer handles isolation, ports, and validation; the adapter handles execution.
+
+---
+
+## 🛠️ CLI Reference
 
 | Command | Purpose |
 | :--- | :--- |
-| **`parallel-agents init`** | Detects repository and creates `.parallel-agents/config.yaml` & directories. |
-| **`parallel-agents doctor`** | Diagnoses Git state, worktree integrity, and detects port conflicts. |
-| **`parallel-agents spawn`** | Automatically creates an isolated worktree, branch, `.env`, `.lane`, and allocates ports. |
-| **`parallel-agents status`** | Displays active agents, seats, lanes, and allocated ports (supports `--json`). |
-| **`parallel-agents validate`** | Mechanically validates lane path compliance and runs configured test commands. |
-| **`parallel-agents diff`** | Shows modified files categorized into `[LANE OK]` vs. `[OUT-OF-LANE]`. |
-| **`parallel-agents inspect`** | Displays detailed metadata, allocated ports, and environment variables for an agent. |
+| **`parallel-agents init`** | Initializes repository and creates configuration. |
+| **`parallel-agents doctor`** | Diagnoses repository, worktree, and port health. |
+| **`parallel-agents spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
+| **`parallel-agents status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
+| **`parallel-agents validate`** | Mechanically validates lane compliance and runs test suites. |
+| **`parallel-agents diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
+| **`parallel-agents inspect`** | Shows detailed agent metadata and environment variables. |
 | **`parallel-agents logs`** | Tails structured execution logs for an agent session. |
-| **`parallel-agents stop`** | Gracefully terminates an agent process. |
-| **`parallel-agents restart`** | Restarts an agent process in its worktree. |
-| **`parallel-agents repair`** | Self-repairs stale process records and cleans orphaned port locks. |
-| **`parallel-agents cleanup`** | Safely removes worktree, releases port reservations, and clears state. |
+| **`parallel-agents stop`** | Stops an active agent process. |
+| **`parallel-agents restart`** | Restarts an agent in its worktree. |
+| **`parallel-agents repair`** | Repairs stale states and releases orphaned ports. |
+| **`parallel-agents cleanup`** | Safely removes worktrees and releases port allocations. |
 
 ---
 
-## 📚 The Complete Deep-Dive Handbook
+## 💡 Design Philosophy
 
-| Chapter | Topic | What It Teaches |
-| :--- | :--- | :--- |
-| **[01. Working Agreement](01-working-agreement.md)** | **Quality Bar & Contracts** | Definition-of-Done checklist, path boundary contracts, security rules, and merge discipline. |
-| **[02. Conflict Management](02-conflict-management.md)** | **Isolation & Recovery** | 4-seat port table, worktrees, migration IDs, index union merges, and the **Disaster Recovery Runbook**. |
-| **[03. Orchestration](03-orchestration.md)** | **Capabilities & Metrics** | 3-state capability model, scaling 2→4→6 seats, review chains, and **Parallel Velocity ROI Metrics**. |
-| **[04. Per-Agent Setup](04-agent-setup.md)** | **Prompts & Session Hygiene** | Copy-paste prompt templates for Senior and Junior seats; controlling context token runaway. |
-| **[05. GitHub Mechanics](05-github-mechanics.md)** | **Board & Issue Routing** | Board single-select fields, disjoint milestones, sub-issues, and single-account routing. |
-| **[06. Free-Tier Operations](06-free-tier-ops.md)** | **CI & Verified Mirror** | Public vs. private trade-offs, divergence check scripts, and optimizing CI allowances per seat. |
-| **[🎬 End-to-End Walkthrough](EXAMPLES.md)** | **Ticket #102 Lifecycle** | Trace a real ticket from assignment → `.lane` check → worktree dev → PR gate declaration → senior merge. |
+1. **Isolation Over Instructions**: Do not merely instruct agents to avoid collisions; provide physically isolated environments.
+2. **Mechanical Validation Over Trust**: Never assume an agent followed the rules; mechanically verify diffs against lane policies.
+3. **Simple Over Clever**: Coordinate coding agents with clarity; do not build an autonomous swarm or bloated web UI.
+4. **Developer in Control**: Agents propose changes; humans review and merge them.
+5. **Safe Cleanup**: Never sacrifice uncommitted developer work for aggressive cleanup.
 
 ---
 
-## 📦 Repository Structure
+## 🚫 What Parallel Agents Is Not
 
-```
-parallel-agents/
-├── README.md                  # The Story, Concepts & 5-Minute Quickstart
-├── EXAMPLES.md                # End-to-End Walkthrough of Ticket #102
-├── 01-working-agreement.md     # Quality Bar & Definition-of-Done
-├── 02-conflict-management.md   # Port Isolation & Disaster Recovery Runbook
-├── 03-orchestration.md         # Capability Cards & Parallel ROI Metrics
-├── 04-agent-setup.md          # Agent Prompts & Token Cost Control
-├── 05-github-mechanics.md     # GitHub Board & Issue Routing
-├── 06-free-tier-ops.md        # CI Minute Optimization & Verified Mirror
-├── bootstrap.sh               # One-touch board setup script
-├── bootstrap.conf.example     # Configuration for bootstrap script
-├── CHANGELOG.md               # Semantic Versioning Release Notes
-└── templates/                 # Ready-to-copy issue forms, PR templates & hooks
-    ├── pull_request_template.md
-    ├── issue-template-task.yml
-    ├── issue-template-bug.yml
-    ├── ci.yml
-    ├── dot-lane.example
-    ├── gitattributes
-    └── git-hooks/
-```
+* ❌ Not an autonomous AI software company.
+* ❌ Not an AI project manager.
+* ❌ Not a replacement for Git or CI/CD.
+* ❌ Not tied to any single AI vendor or model.
+
+It is a **lightweight coordination and safety layer** for parallel AI coding agents.
+
+---
+
+## 📚 Deep-Dive Documentation & Guides
+
+| Document | Description |
+| :--- | :--- |
+| **[🎬 End-to-End Walkthrough](EXAMPLES.md)** | Step-by-step lifecycle of Ticket #102 from assignment to merge. |
+| **[01. Working Agreement](01-working-agreement.md)** | Definition-of-Done, path boundary contracts, and merge discipline. |
+| **[02. Conflict Management](02-conflict-management.md)** | Worktree deep-dive, port tables, and Disaster Recovery Runbook. |
+| **[03. Orchestration](03-orchestration.md)** | Capability cards, scaling 2→4→6 seats, and ROI metrics. |
+| **[04. Agent Setup](04-agent-setup.md)** | Prompts for Senior/Junior agents and token cost hygiene. |
+| **[05. GitHub Mechanics](05-github-mechanics.md)** | Board custom fields, disjoint milestones, and single-account routing. |
+| **[06. Free-Tier Operations](06-free-tier-ops.md)** | CI minute optimization, public vs private repo trade-offs, and verified mirrors. |
 
 ---
 
 ## 🤝 Community & Contributing
 
-Contributions from both human engineers and AI harness operators are warmly welcomed!
-
-* **[Contributing Guide](CONTRIBUTING.md)**: Guidelines for filing issues, creating PRs, and lane-bound workflows.
-* **[Security Policy](SECURITY.md)**: Responsible vulnerability disclosure and agent security best practices.
-* **[Code of Conduct](CODE_OF_CONDUCT.md)**: Contributor Covenant standard.
+Contributions are welcome! See our community guidelines:
+* **[Contributing Guide](CONTRIBUTING.md)**
+* **[Security Policy](SECURITY.md)**
+* **[Code of Conduct](CODE_OF_CONDUCT.md)**
 
 ---
 
