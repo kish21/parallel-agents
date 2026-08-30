@@ -90,15 +90,38 @@ def run_benchmark(cycles: int = 10) -> dict:
             # 2. Init
             run("init --name BenchApp", cwd=root)
 
-            # 3. Simultaneously spawn 3 concurrent agents
-            import concurrent.futures
-            spawn_cmds = [
-                'spawn --name backend-1 --lane backend --task "API"',
-                'spawn --name frontend-1 --lane frontend --task "UI"',
-                'spawn --name data-1 --lane backend --task "Migrations"',
+            # 3. Simultaneously spawn 3 concurrent agents via independent OS processes
+            src_dir = str(Path(__file__).resolve().parent.parent / "src")
+            env = {**os.environ, "PYTHONPATH": src_dir}
+            spawn_payloads = [
+                ("backend-1", "backend", "API"),
+                ("frontend-1", "frontend", "UI"),
+                ("data-1", "backend", "Migrations"),
             ]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                list(executor.map(lambda c: run(c, cwd=root), spawn_cmds))
+            procs = []
+            for name, lane, task in spawn_payloads:
+                p = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "parallel_agents.cli",
+                        "spawn",
+                        "--name",
+                        name,
+                        "--lane",
+                        lane,
+                        "--task",
+                        task,
+                    ],
+                    cwd=str(root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                )
+                procs.append(p)
+
+            for p in procs:
+                p.communicate()
 
             stats["total_agents_spawned"] += 3
 

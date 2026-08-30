@@ -153,6 +153,60 @@ class TestE2EConcurrent(unittest.TestCase):
         self.assertEqual(len(state_mgr.list_agents()), 0)
         self.assertEqual(len(state_mgr.get_allocated_ports()), 0)
 
+    def test_ten_processes_concurrent_subprocess_spawns(self):
+        """Spawns 10 independent OS subprocesses (separate PIDs) concurrently via CLI."""
+        import sys
+        cmd_init(argparse.Namespace(name="SubprocApp", force=False))
+        cfg = generate_default_config("SubprocApp")
+        cfg.max_agents = 15
+        save_config(cfg, self.root)
+
+        src_dir = str(Path(__file__).resolve().parent.parent / "src")
+        env = {**os.environ, "PYTHONPATH": src_dir}
+
+        # Launch 10 simultaneous independent OS processes
+        procs = []
+        for i in range(1, 11):
+            lane = "backend" if i % 2 == 0 else "frontend"
+            p = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "parallel_agents.cli",
+                    "spawn",
+                    "--name",
+                    f"proc-worker-{i}",
+                    "--lane",
+                    lane,
+                    "--task",
+                    f"Task {i}",
+                    "--seat",
+                    "JR1",
+                ],
+                cwd=str(self.root),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            procs.append(p)
+
+        # Wait for all OS processes to complete
+        for p in procs:
+            stdout, stderr = p.communicate()
+            self.assertEqual(p.returncode, 0, f"Process failed: {stderr.decode()}")
+
+        state_mgr = StateManager(self.root)
+        agents = state_mgr.list_agents()
+        self.assertEqual(len(agents), 10, "Expected 10 agents from independent processes")
+
+        ids = [a.id for a in agents]
+        wts = [a.worktree_path for a in agents]
+        be_ports = [a.ports["backend"] for a in agents]
+
+        self.assertEqual(len(set(ids)), 10, f"Colliding IDs across OS processes: {ids}")
+        self.assertEqual(len(set(wts)), 10, f"Colliding worktrees across OS processes: {wts}")
+        self.assertEqual(len(set(be_ports)), 10, f"Colliding ports across OS processes: {be_ports}")
+
 
 if __name__ == "__main__":
     unittest.main()
