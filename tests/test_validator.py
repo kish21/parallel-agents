@@ -27,7 +27,8 @@ class TestValidator(unittest.TestCase):
         self.validator = Validator(self.config, self.state_mgr, self.wt_mgr)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_validate_in_lane_pass(self):
         branch = self.wt_mgr.make_branch_name("agent-001", "Auth API")

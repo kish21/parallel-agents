@@ -18,7 +18,8 @@ class TestConfig(unittest.TestCase):
         self.root = Path(self.tmp_dir.name)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_generate_default_config(self):
         cfg = generate_default_config("MyTestApp")

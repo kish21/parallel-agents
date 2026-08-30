@@ -26,7 +26,8 @@ class TestDoctor(unittest.TestCase):
         self.doctor = Doctor(self.root, self.config, self.state_mgr)
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        import shutil
+        shutil.rmtree(self.tmp_dir.name, ignore_errors=True)
 
     def test_clean_doctor_diagnosis(self):
         report = self.doctor.diagnose()
