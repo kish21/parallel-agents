@@ -12,6 +12,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+# The shell round-trip is the strongest available proof that a value cannot escape its
+# line, but it needs a POSIX shell. Windows runners have one via Git Bash; guard anyway so
+# a runner without it reports a clear skip instead of an error. The non-shell assertions
+# (balanced quoting, line counts) still run everywhere.
+SH = shutil.which("sh")
+requires_sh = unittest.skipIf(SH is None, "no POSIX shell available on this platform")
+
 from parallel_agents.config import Config
 from parallel_agents.environment import EnvironmentManager, sanitize_env_key, shell_quote
 from parallel_agents.state import AgentState
@@ -37,6 +44,7 @@ class TestShellQuote(unittest.TestCase):
                 self.assertNotIn("\n", quoted)
                 self.assertNotIn("\r", quoted)
 
+    @requires_sh
     def test_roundtrips_through_a_real_shell(self):
         """The definitive check: /bin/sh must read back exactly what we meant to store."""
         for raw in HOSTILE_TASKS:
@@ -82,6 +90,7 @@ class TestEnvFileIsInjectionProof(unittest.TestCase):
                     f"task {raw!r} changed the .env line count — injection is possible",
                 )
 
+    @requires_sh
     def test_sourcing_env_yields_the_literal_task(self):
         """A hostile task must be inert data after `source`, not executed or expanded."""
         for raw in HOSTILE_TASKS:
@@ -94,6 +103,7 @@ class TestEnvFileIsInjectionProof(unittest.TestCase):
                 self.assertEqual(res.returncode, 0, res.stderr)
                 self.assertEqual(res.stdout, " ".join(raw.split()))
 
+    @requires_sh
     def test_command_substitution_is_not_executed(self):
         self._write("run `id` and $(whoami)")
         res = subprocess.run(
@@ -104,6 +114,7 @@ class TestEnvFileIsInjectionProof(unittest.TestCase):
         self.assertIn("$(whoami)", res.stdout)
         self.assertNotIn("uid=", res.stdout)
 
+    @requires_sh
     def test_lane_file_is_quoted_too(self):
         agent = AgentState(
             id="agent-001", name="w1", seat="SR1'; echo pwned", lane="backend",

@@ -23,7 +23,7 @@ def git(args, cwd):
 # `unittest discover` imports these as top-level modules, so a package-relative import
 # would not resolve. Put the tests directory on the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _cli_harness import run_cli  # noqa: E402
+from _cli_harness import output_of, run_cli  # noqa: E402
 
 
 class TestEnsureGitignore(unittest.TestCase):

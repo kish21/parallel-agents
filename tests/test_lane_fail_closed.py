@@ -33,7 +33,7 @@ DANGEROUS_FILES = [
 # `unittest discover` imports these as top-level modules, so a package-relative import
 # would not resolve. Put the tests directory on the path explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _cli_harness import run_cli  # noqa: E402
+from _cli_harness import output_of, run_cli  # noqa: E402
 
 
 class TestConfigLaneLookupIsStrict(unittest.TestCase):
@@ -128,7 +128,7 @@ class TestCliRejectsUndeclaredLane(unittest.TestCase):
 
     def test_spawn_rejects_unknown_lane_and_provisions_nothing(self):
         res = run_cli(["spawn", "--lane", "NOPE", "--name", "b1", "--task", "x"], self.tmp)
-        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertEqual(res.returncode, 1, output_of(res))
         self.assertIn("Unknown lane", res.stderr)
         self.assertIn("backend", res.stderr)  # lists valid lanes
 
@@ -145,7 +145,7 @@ class TestCliRejectsUndeclaredLane(unittest.TestCase):
 
     def test_spawn_accepts_declared_lane(self):
         res = run_cli(["spawn", "--lane", "backend", "--name", "b1", "--task", "x"], self.tmp)
-        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertEqual(res.returncode, 0, output_of(res))
 
     def test_validate_refuses_agent_whose_lane_was_removed_from_config(self):
         """The state file can outlive a config edit; that must fail closed, not open."""
@@ -165,7 +165,7 @@ class TestCliRejectsUndeclaredLane(unittest.TestCase):
             f.write_text("sensitive", encoding="utf-8")
 
         res = run_cli(["validate", "agent-001"], self.tmp)
-        self.assertEqual(res.returncode, 2, res.stdout + res.stderr)
+        self.assertEqual(res.returncode, 2, output_of(res))
         self.assertNotIn("VALIDATION PASSED", res.stdout)
         self.assertIn("VALIDATION FAILED", res.stdout)
 
@@ -177,7 +177,7 @@ class TestCliRejectsUndeclaredLane(unittest.TestCase):
         save_config(cfg, self.tmp)
 
         res = run_cli(["diff", "agent-001"], self.tmp)
-        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertEqual(res.returncode, 1, output_of(res))
         self.assertNotIn("LANE OK", res.stdout)
 
 
