@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.4.0] - 2026-08-31
+
+Usability release, from walking the tool as a first-time user rather than reviewing the
+code. Two of the three problems that walkthrough found were defects, not preferences.
+
+### Security
+
+- **Modified files had their paths truncated, letting edits bypass lane and gate checks.**
+  `get_changed_files` called `line.strip()` before slicing `line[3:]` out of
+  `git status --porcelain`. That format is `XY<space>PATH` with position-significant
+  status columns, and an unstaged edit reads `" M path"` — so stripping removed the
+  leading space and the slice took the first character of the path with it.
+  `secrets/prod.pem` was reported as `ecrets/prod.pem`, which matched no lane or gate
+  pattern. **Creating** a file in a denied directory was blocked; **editing or deleting**
+  one already there was not. Newly created files are reported as `"?? path"`, with no
+  leading space, which parsed correctly — so the entire test suite, which only ever
+  created files, passed over this. Both git queries now use `-z`, which also fixes paths
+  containing spaces or non-ASCII characters and correctly skips a rename's source path.
+
+### Added
+
+- **`init` derives lanes from the repository's actual layout.** The stock lanes assume
+  `backend/`, `src/backend/`, `frontend/`, `web/`; on a normal project they matched
+  nothing, so a new user's first `validate` reported legitimate work as out-of-lane.
+  Detection reads git-tracked files, treats container directories (`src/`, `packages/`,
+  `apps/`) as transparent, classifies each directory by name and then by file-extension
+  majority, gives root-level files to `platform`, and generates mutually exclusive deny
+  lists so one lane means one owner. Measured coverage across four realistic layouts
+  (Python src-layout, Django, Next.js, monorepo): 100%, against 0–40% for the stock lanes.
+- **`init` reports lane coverage** and warns when the configuration matches little of the
+  repository, or when only one lane exists — the latter being the point of the project's
+  first thesis: parallel agents scale with separable lanes, not with agent count.
+- **`init --generic`** opts out of detection and keeps the starter lanes.
+
+### Changed
+
+- **The out-of-lane error now names the likely cause.** When no declared lane would accept
+  a path, the error says the lanes may not match the project and points at `config.yaml`,
+  instead of only reporting the file — which sent users hunting through their diff rather
+  than their configuration.
+
+### Testing
+
+- 139 tests (from 108). `test_changed_files.py` (16) covers modified, staged, untracked,
+  deleted, renamed, spaced and non-ASCII paths, the porcelain parser directly, and the
+  security consequence; it is verified to fail against the previous implementation.
+  `test_layout_detection.py` (15) pins full coverage on four realistic layouts, container
+  transparency, mutual exclusivity, build-output exclusion, and that a legitimate edit
+  validates cleanly end to end.
+
 ## [v0.3.0] - 2026-08-31
 
 Implements capability gates — the second of the two theses in `PLAN.md`, specified in

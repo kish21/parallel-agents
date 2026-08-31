@@ -26,6 +26,7 @@ from .capabilities import (
 )
 from .config import Config, UnknownLaneError, load_config, save_config
 from .doctor import Doctor
+from .layout import detect_layout, measure_coverage
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
 from .ports import PortManager
@@ -49,6 +50,16 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 0
 
     cfg = Config.default(project_name=project_name)
+
+    # Derive lanes from the repository that exists. The stock lanes assume backend/ and
+    # frontend/ directories; on a project laid out any other way they match nothing, and
+    # the first validate fails on legitimate work.
+    detection = None
+    if not getattr(args, "generic", False):
+        detection = detect_layout(root)
+        if detection.is_meaningful:
+            cfg.lanes = detection.lanes
+
     save_config(cfg, root)
 
     state_mgr = StateManager(root)
@@ -64,6 +75,25 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"✨ Initialized parallel-agents for '{project_name}'")
     print(f"📁 Configuration written to {config_file}")
     print(f"📁 Worktrees directory: {cfg.worktree_dir}")
+
+    coverage, total, uncovered = measure_coverage(root, cfg.lanes)
+    lane_names = ", ".join(sorted(cfg.lanes))
+    if detection is not None and detection.is_meaningful:
+        print(f"🧭 Detected {len(cfg.lanes)} lanes from the repository layout: {lane_names}")
+    else:
+        print(f"🧭 Using generic starter lanes: {lane_names}")
+    print(f"   Coverage: {coverage:.0%} of {total} tracked files fall inside a lane.")
+
+    if total and coverage < 0.5:
+        print("\n⚠️  These lanes match little of this repository, so validation will report")
+        print("   legitimate work as out-of-lane. Edit the 'lanes' section of config.yaml to")
+        print("   match your directory structure before spawning agents.")
+        if uncovered:
+            print(f"   Unowned paths include: {', '.join(uncovered[:3])}")
+    elif len(cfg.lanes) < 2 and total:
+        print("\n⚠️  Only one lane was found, so there is nothing to run in parallel.")
+        print("   Parallel agents scale with the number of *separable* lanes, not with the")
+        print("   number of agents. Split the codebase further, or run a single agent.")
     print(f"🎫 Capability cards written for {len(written_cards)} seats: "
           + ", ".join(c.stem for c in written_cards))
     if gitignore_updated:
@@ -600,6 +630,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = subparsers.add_parser("init", help="Initialize parallel-agents in current Git repository")
     p_init.add_argument("--name", help="Project name")
     p_init.add_argument("--force", action="store_true", help="Overwrite existing configuration")
+    p_init.add_argument("--generic", action="store_true",
+                        help="Use the generic starter lanes instead of detecting the repository layout")
     p_init.set_defaults(func=cmd_init)
 
     # doctor
