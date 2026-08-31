@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from parallel_agents.capabilities import default_cards, save_card
 from parallel_agents.config import generate_default_config
 from parallel_agents.doctor import Doctor
 from parallel_agents.state import AgentState, StateManager
@@ -22,6 +23,9 @@ class TestDoctor(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True)
 
         self.config = generate_default_config("DoctorApp")
+        # Gates ship enabled; a gate with no cards is a doctor problem by design.
+        for card in default_cards(sorted(self.config.lanes)):
+            save_card(card, self.root)
         self.state_mgr = StateManager(self.root)
         self.doctor = Doctor(self.root, self.config, self.state_mgr)
 
