@@ -16,6 +16,9 @@ Everything here comes from running the CLI against a real full-stack application
 backend and a live Vite dev server per agent — rather than against temporary directories
 and stub agents. Three of the guarantees the tool advertises did not survive that.
 
+It is also the first release prepared for distribution on PyPI, so the packaging metadata
+had to become true.
+
 ### Fixed
 
 - **A generated `.env` did not connect a frontend to its own backend.** It wrote port
@@ -50,6 +53,18 @@ and stub agents. Three of the guarantees the tool advertises did not survive tha
   in state referred to. Ids are now monotonic, backed by a persisted high-water mark that
   is reconciled against live state so a lost counter can only resume the sequence.
 
+- **The package reported the wrong version.** `__version__` was a literal reading `0.1.0`
+  while pyproject and `VERSION` both said `0.6.0` — five releases stale, and undetectable,
+  because nothing compared it to anything. It is now derived: the `VERSION` file in a
+  source checkout, the installed distribution's own metadata otherwise. A test asserts all
+  three agree.
+
+- **The README's install section contradicted itself.** The v0.5.0 rename rewrote the
+  paragraph mechanically, leaving it claiming the distribution is published under
+  `lanekeeper` *and* that `lanekeeper` is taken on PyPI by someone else. It also still
+  advertised a `parallel-agents` alias that the same release had removed. This matters
+  beyond the repository: PyPI renders the README as the project page.
+
 ### Added
 
 - `lanekeeper.frameworks` — detects the client-visible environment prefixes a repository's
@@ -60,6 +75,8 @@ and stub agents. Three of the guarantees the tool advertises did not survive tha
   `doctor` now only recommends `repair` when something is actually repairable.
 - `spawn` refuses a target path that already exists, naming the cause, instead of failing
   inside git.
+- `lanekeeper --version`, so an installed copy can state which build it is. The first
+  thing anyone asks of a CLI they did not build from source.
 
 ---
 

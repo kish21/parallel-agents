@@ -99,10 +99,11 @@ This prevents agents from talking to the wrong development server.
 pip install lanekeeper
 ```
 
-The distribution is published as **`lanekeeper`**; the command it installs is
-**`lanekeeper`**, with `lanekeeper` kept as an alias so either works. (The name
-`lanekeeper` was already taken on PyPI by an unrelated project, so installing that
-would fetch someone else's package.)
+This installs the `lanekeeper` command. Check which build you have with:
+
+```bash
+lanekeeper --version
+```
 
 From a clone:
 
