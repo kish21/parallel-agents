@@ -236,29 +236,29 @@ A lane is a **feature slice, not a tech layer.**
 
 This is the single decision that makes or breaks a lane file. The tempting split is
 `backend` / `frontend` / `infra`, because it matches the folder tree. It is the wrong
-one: a real ticket — *"the style picker reads None on a scene that plainly has a style"* —
-touches a prompt template, a service, a schema, a React page and four tests. Under a layer
+one: an ordinary ticket — *"an expired coupon still shows a struck-through price"* —
+touches a service, a schema, an API route, a React component and four tests. Under a layer
 split that is one ticket against four lanes, so either four agents coordinate to ship it
 or one agent escalates four times. Under a feature split it is one agent, one lane, one PR.
 
 ```yaml
 lanes:
-  images:                                   # a feature, top to bottom
+  checkout:                                 # a feature, top to bottom
     allow:
-      - backend/app/stages/images/**
-      - backend/app/providers/image_modal_flux.py
-      - backend/app/schemas/images.py
-      - frontend/src/components/images/**
-      - frontend/src/pages/pipeline/ImageStagePage.tsx
-      - backend/tests/test_images.py
+      - backend/app/domains/checkout/**
+      - backend/app/api/checkout.py
+      - backend/app/schemas/order.py
+      - frontend/src/components/checkout/**
+      - frontend/src/pages/CheckoutPage.tsx
+      - backend/tests/test_checkout.py
 ```
 
 ```
-images agent          voice agent           checkout agent
+checkout agent        search agent          catalog agent
       ↓                     ↓                      ↓
- prompt · service      prompt · service      service · page
- schema · page         schema · page         schema · tests
- provider · tests      provider · tests
+ service · api         service · api         service · api
+ schema · page         schema · page         schema · page
+ provider · tests      provider · tests      provider · tests
 ```
 
 The goal is not to isolate every single file — it is that **one ticket lands in one lane.**
@@ -273,40 +273,41 @@ but it proposes for confirmation — the file, not the detection, is the source 
 Hand-editing it is the expected act, and `check` and `spawn` honour the edit with no other
 action.
 
-A worked example against a real 1,360-file production codebase — 17 lanes, 8 shared zones,
-and the judgement calls annotated — is in
-[`examples/feature-lanes.yaml`](examples/feature-lanes.yaml).
+A complete worked example — a mid-size e-commerce SaaS carved into 17 lanes and 8 shared
+zones, with every judgement call annotated — is in
+[`examples/feature-lanes.yaml`](examples/feature-lanes.yaml). The project is invented; the
+awkward parts of the split are not.
 
 ### The whole schema
 
 ```yaml
 version: 1
 
-unowned: new-files        # a path in no lane and no shared zone:
+unowned: new-modules      # a path in no lane and no shared zone:
                           #   error | allow | <lane-name>
 
 defaults:
   harness: claude-code    # inherited by every lane that does not override it
 
 lanes:
-  images:
-    description: Every still — prompts, model routing, cast, photo fitting.
+  checkout:
+    description: Cart to confirmed order — addresses, shipping, the order write.
     owner: senior         # a ROLE this lane needs, not a seat number
     harness: claude-code  # optional; overrides defaults
     allow:
-      - backend/app/stages/images/**
-      - frontend/src/components/images/**
+      - backend/app/domains/checkout/**
+      - frontend/src/components/checkout/**
     deny:                 # carve-outs inside your own allow
-      - backend/app/stages/images/legacy/**
+      - backend/app/domains/checkout/legacy/**
 
-  new-files:
+  new-modules:
     description: The greenfield lane.
     claims: unowned       # at most one lane; holds every unclaimed path
 
 shared:
-  pipeline-spine:
-    description: Where every stage plugs in.
-    steward: orchestration  # the lane that may edit without escalating,
+  request-spine:
+    description: Where every feature plugs in.
+    steward: platform       # the lane that may edit without escalating,
                             # and the lane everyone else escalates TO
     mode: escalate          # escalate | append_only
     paths:
@@ -317,7 +318,7 @@ shared:
     description: Adding a file is free; editing an applied one is not.
     mode: append_only       # any lane may ADD a file here; changing an
     paths:                  # existing one is an escalation
-      - supabase/migrations/**
+      - db/migrations/**
 ```
 
 ### The four rules that decide who owns a path
@@ -335,17 +336,18 @@ shared:
 
 ### `owner` is a role, not a seat
 
-One lane, one owner at a time. But a real project has far more lanes than running agents.
-The worked example has 17 lanes and 4 seats, and that ratio is normal — so **the file names
-the role a lane needs, and `spawn` binds it to a seat.** A lane split is a design decision with a long half-life; who is
-sitting in front of it this week is not, and the two do not belong in the same field.
+One lane, one owner at a time. But a real project has far more lanes than running agents —
+a 17-lane split routinely runs on four seats — so **the file names the role a lane needs,
+and `spawn` binds it to a seat.** A lane split is a design decision with a long half-life;
+who is sitting in front of it this week is not, and the two do not belong in the same
+field.
 
 ### `shared` needs a steward
 
 The original design said a shared zone is owned by nobody and touching it needs escalation.
 Half of that survives contact with a real repo. `backend/app/main.py` is genuinely shared —
-every stage registers itself there — but if it is owned by nobody, then the orchestration
-lane, whose whole job is that file, escalates to no one in order to do its own work.
+every feature registers itself there — but if it is owned by nobody, then the platform lane,
+whose whole job is that file, escalates to no one in order to do its own work.
 
 So a zone may name a `steward`: the one lane that edits it directly, and the lane every
 other lane escalates *to*. `steward` is optional — omit it for a zone that really is
