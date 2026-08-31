@@ -48,6 +48,26 @@ All pull requests must satisfy our [01 — Working Agreement](01-working-agreeme
 
 ---
 
+## 🚢 Releasing
+
+Releases publish themselves. Pushing a `v*` tag runs `.github/workflows/release.yml`,
+which builds the distributions, checks their metadata, installs the wheel into a clean
+virtual environment to confirm it reports the right version, and uploads to PyPI through
+Trusted Publishing — there is no API token in this repository.
+
+To cut a release:
+
+1. Bump `version` in `pyproject.toml` and the `VERSION` file to match. CI fails if they
+   disagree, and the release workflow fails if the tag disagrees with either.
+2. Add the section to `CHANGELOG.md`.
+3. Merge to `main`, then tag it: `git tag v0.7.0 && git push origin v0.7.0`.
+4. Create the GitHub release from that tag, with the changelog section as its notes.
+
+A published version is permanent. PyPI never allows a version number to be reused, even
+after deletion — a bad upload costs a version number, so let the workflow do the checks.
+
+---
+
 ## 📜 Code of Conduct
 
 All contributors are expected to uphold our [Code of Conduct](CODE_OF_CONDUCT.md) to maintain a welcoming, respectful, and inclusive environment.

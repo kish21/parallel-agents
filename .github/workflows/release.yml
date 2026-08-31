@@ -1,0 +1,83 @@
+name: Publish to PyPI
+
+# Tag-triggered, so the release artifact is built from exactly the commit the tag names.
+# Publishing uses PyPI Trusted Publishing (OIDC): the job exchanges a short-lived GitHub
+# identity token for an upload token at publish time. No API token is stored in this
+# repository, so there is no long-lived credential to leak, rotate, or forget.
+#
+# One-time setup on pypi.org (Manage project -> Publishing) before the first run:
+#   Owner: kish21 | Repository: parallel-agents | Workflow: release.yml | Environment: pypi
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A tag is the only thing that decides which version gets published, and it is
+      # written by hand. Publishing v0.7.0 from a tree that says 0.6.0 would put a
+      # permanently wrong version on PyPI — releases cannot be replaced, only yanked.
+      - name: Tag must match the declared version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          v_file=$(tr -d '[:space:]' < VERSION)
+          echo "tag=$tag VERSION=$v_file"
+          test "$tag" = "$v_file" || {
+            echo "Tag $GITHUB_REF_NAME does not match VERSION ($v_file)"; exit 1;
+          }
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: Verify metadata renders on PyPI
+        run: python -m twine check dist/*
+
+      # Install the built wheel somewhere with no source tree in sight. It is the only
+      # check that exercises the installed path an end user gets: no VERSION file, so the
+      # version must come from the distribution's own metadata.
+      - name: Smoke-test the wheel as an end user
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          reported=$(/tmp/smoke/bin/lanekeeper --version)
+          echo "$reported"
+          test "$reported" = "lanekeeper $(tr -d '[:space:]' < VERSION)" || {
+            echo "Installed wheel reports the wrong version"; exit 1;
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # The environment is what the PyPI publisher is bound to, and it is where a manual
+    # approval gate can be added later without touching this file.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/lanekeeper
+    permissions:
+      id-token: write  # required for OIDC; nothing else is granted
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
