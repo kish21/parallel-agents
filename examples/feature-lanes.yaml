@@ -1,0 +1,762 @@
+# feature-lanes.yaml — a worked example
+#
+# A lane file written by hand for a real production codebase: ~1,360 tracked
+# files, a Python backend, a React frontend and a Postgres schema, split into 17
+# lanes and 8 shared zones. The product is a multi-stage AI video generator, and
+# its stages (discovery, script, images, video, assembly, QC) are what the lanes
+# are named for. Substitute your own.
+#
+# Read it for the shape, not the paths. The point it makes is that lanes are
+# FEATURE SLICES, not tech layers. There is no "backend" lane, and the "frontend"
+# lane is a residue rather than a design — `images` owns a stage runner, its
+# prompt YAML, its provider, its schemas, its React page and its tests, because
+# that is the set of files one ticket touches. A layer split would have put every
+# one of those files in a different lane and made every ticket a four-lane
+# escalation.
+#
+# Judgement calls are marked NOTE. There are more of them than the schema
+# suggests there would be.
+
+version: 1
+
+# A path that no lane claims and no shared zone covers.
+#   error  — refuse to validate; every file must have a home
+#   allow  — anyone may touch it
+#   <lane> — it belongs to that lane
+# This file names a lane, because the honest answer on a live repo is that the
+# greenfield work has an owner too. See the `new-files` lane.
+unowned: new-files
+
+# Overlapping `allow` globs resolve by specificity: the pattern with the most
+# wildcard-free path segments wins, ties broken by pattern length, a remaining
+# exact tie is a load error naming both lanes. Declaration order is irrelevant —
+# this file is hand-edited and must not depend on it.
+#
+# A shared zone always beats a lane `allow`, however specific.
+
+defaults:
+  harness: claude-code
+
+
+lanes:
+
+  # ---------------------------------------------------------------- pipeline --
+  # One lane per pipeline stage. Each owns its runner, prompt, schemas, provider,
+  # page and tests — the vertical slice, not the layer.
+
+  setup:
+    description: >-
+      The brief. URL and document enrichment, competitor and review extraction,
+      the brief quality gate, and everything on the Setup page.
+    owner: junior
+    allow:
+      - backend/app/api/brief_enrich.py
+      - backend/app/api/brief_suggest.py
+      - backend/app/api/document_enrich.py
+      - backend/app/api/review_suggest.py
+      - backend/app/api/competitor_suggest.py
+      - backend/app/api/competitor_teardown.py
+      - backend/app/api/uploads.py
+      - backend/app/domain/enrichment/**
+      - backend/app/pipeline/brief_assembly.py
+      - backend/app/prompts/brief_suggest.yaml
+      - backend/app/prompts/competitor_*.yaml
+      - backend/app/prompts/document_enrich.yaml
+      - backend/app/prompts/review_suggest.yaml
+      - backend/app/providers/scraper.py
+      - backend/app/providers/search_provider.py
+      - backend/app/db/option_sets.py
+      - backend/app/schemas/brief.py
+      - backend/app/schemas/brief_suggest.py
+      - backend/app/schemas/competitor.py
+      - backend/app/schemas/reviews.py
+      - frontend/src/components/setup/**
+      - frontend/src/pages/pipeline/SetupPage.tsx
+      - frontend/src/lib/brief*.ts
+      - frontend/src/lib/brief*.tsx
+      - frontend/src/lib/autofill*.ts
+      - frontend/src/lib/setup*.ts
+      - frontend/src/lib/missionShape*.ts
+      - frontend/src/lib/missionIcons.ts
+      - frontend/src/lib/missionRouting.test.ts
+      - frontend/src/lib/competitorAnalysis*.ts
+      - frontend/src/lib/regions.ts
+      - frontend/src/hooks/useBrief*.ts
+      - frontend/src/hooks/useSetupOptions.ts
+      - frontend/src/hooks/useMissionShape.ts
+      - frontend/src/hooks/useMarketingIntents.ts
+      - backend/tests/test_brief_*.py
+      - backend/tests/test_competitor_*.py
+      - backend/tests/test_document_enrich.py
+      - backend/tests/test_review_suggest.py
+      - backend/tests/test_reviews_extractor.py
+      - backend/tests/test_scraper*.py
+      - backend/tests/test_setup_*.py
+      - backend/tests/test_uploads.py
+      - backend/tests/test_url_*.py
+      - backend/tests/test_verified_brief.py
+      - backend/tests/test_narrative_brief.py
+      - backend/tests/test_no_field_removal.py
+      - backend/tests/test_language_detection.py
+      - backend/tests/fixtures/**
+      - scripts/capture_firecrawl_fixture.py
+    deny:
+      # `setup` writes the brief; `ad-format` decides what KIND of ad it is, and
+      # its two setup-page rows are named for it. A carve-out, not a directory
+      # boundary — the seam is the feature, not the folder.
+      - frontend/src/components/setup/AdFormatRow.*
+      - frontend/src/components/setup/AdHookSelector.*
+
+  discovery:
+    description: >-
+      Brand DNA extraction from the customer's site — the scrape, the computed
+      colour and typography read, the DNA cache and its invalidation.
+    owner: senior
+    allow:
+      - backend/app/stages/discovery/**
+      - backend/app/schemas/context_dna.py
+      - backend/app/infra/color.py
+      - backend/app/infra/safe_fetch.py
+      - frontend/src/components/discovery/**
+      - frontend/src/pages/pipeline/DiscoveryPage.tsx
+      - frontend/src/lib/prompts/discoveryPrompt.ts
+      - frontend/src/lib/dnaProvenance*.ts
+      - frontend/src/lib/brandKitSeams*.ts
+      - backend/tests/test_discovery*.py
+      - backend/tests/test_deep_multipage_discovery.py
+      - backend/tests/test_playwright_computed_css_colors.py
+      - backend/tests/test_safe_fetch.py
+
+  story:
+    description: >-
+      Narrative: industry profiles, treatments, strategy slots, and the storyboard
+      that turns the chosen narrative into scenes.
+    owner: senior
+    allow:
+      - backend/app/stages/story/**
+      - backend/app/stages/storyboard/**
+      - backend/app/infra/motion_fill.py
+      - frontend/src/components/storyboard/**
+      - frontend/src/pages/pipeline/StoryPage.tsx
+      - frontend/src/pages/pipeline/StoryboardPage.tsx
+      - frontend/src/lib/prompts/storyPrompt.ts
+      - frontend/src/lib/storyAttribution*.ts
+      - frontend/src/lib/story*.tsx
+      - frontend/src/lib/sceneProvenance*.ts
+      - backend/tests/test_story*.py
+      - backend/tests/test_sparse_story_slots.py
+      - backend/tests/test_scene_treatment.py
+
+  script-voice:
+    description: >-
+      FUSED. The written line and the spoken line are one lane because they are
+      one artefact. A rewrite on the Voiceover page and a confirm on the Script
+      page were overwriting each other's column; split into two lanes, each was
+      correct about a script of record the other had already changed.
+    owner: senior
+    allow:
+      - backend/app/stages/script/**
+      - backend/app/stages/voiceover/**
+      - backend/app/prompts/script_*.yaml
+      - backend/app/providers/tts_*.py
+      - backend/app/providers/voice_config.py
+      - backend/app/providers/voice_personas.py
+      - backend/app/providers/alignment_modal.py
+      - backend/app/infra/chatterbox_runtime.py
+      - backend/app/infra/alignment_runtime.py
+      - backend/app/infra/narration_decision.py
+      - backend/app/infra/mode_pairing.py
+      - backend/app/infra/wav.py
+      - backend/app/pipeline/speakable.py
+      - backend/app/pipeline/spoken_numerals.py
+      - backend/app/pipeline/pace.py
+      - backend/app/db/voice_pace.py
+      - backend/app/api/voices.py
+      - backend/app/data/cluster_lexicon.txt
+      - backend/app/schemas/script_line.py
+      - backend/app/schemas/script_review.py
+      - backend/app/schemas/voiceover.py
+      - backend/app/schemas/voice_capabilities.py
+      - backend/app/schemas/llm.py
+      - frontend/src/pages/pipeline/ScriptPage.tsx
+      - frontend/src/pages/pipeline/VoiceoverPage.tsx
+      - frontend/src/components/pipeline/Voice*.tsx
+      - frontend/src/components/pipeline/Narration*.tsx
+      - frontend/src/components/pipeline/CastingPanel.tsx
+      - frontend/src/components/pipeline/LineRewriteProposal.tsx
+      - frontend/src/hooks/useVoice*.ts
+      - frontend/src/hooks/useLineRewrite.ts
+      - frontend/src/lib/voice*.ts
+      - frontend/src/lib/speakers*.ts
+      - frontend/src/lib/pace*.ts
+      - frontend/src/lib/casting*.ts
+      - frontend/src/lib/lineRewrite*.ts
+      - backend/tests/test_script*.py
+      - backend/tests/test_voice*.py
+      - backend/tests/test_tts_*.py
+      - backend/tests/test_pronunciation.py
+      - backend/tests/test_spoken_numerals.py
+      - backend/tests/test_narration_mode.py
+      - backend/tests/test_alignment_backfill.py
+      - backend/tests/test_multi_language.py
+      - backend/tests/test_visual_brief.py
+      - backend/tests/test_mode_pairing.py
+      - backend/tests/calibration/script_*
+      - backend/scripts/script_calibrate.py
+      - backend/scripts/tts_bakeoff.py
+      - backend/scripts/voice_*.py
+      - backend/scripts/alignment_check.py
+
+  images:
+    description: >-
+      Every still: prompt compilation, model routing, character cast and
+      consistency, customer photo fitting, stock footage routing.
+    owner: senior
+    allow:
+      - backend/app/stages/images/**
+      - backend/app/pipeline/image_part.py
+      - backend/app/pipeline/scene_image.py
+      - backend/app/pipeline/photo_*.py
+      - backend/app/pipeline/asset_pool.py
+      - backend/app/prompts/photo_*.yaml
+      - backend/app/providers/image_modal_flux.py
+      - backend/app/providers/footage_*.py
+      - backend/app/infra/flux_runtime.py
+      - backend/app/infra/scene_assets.py
+      - backend/app/infra/visual_decision.py
+      - frontend/src/components/pipeline/VisualModePicker.tsx
+      - backend/tests/test_visual_mode.py
+      - backend/app/infra/sizes.py
+      - backend/app/infra/model_families.py
+      - backend/app/db/asset_descriptions.py
+      - backend/app/api/project_assets.py
+      - backend/app/schemas/images.py
+      - backend/app/schemas/assets.py
+      - backend/app/schemas/asset_pool.py
+      - backend/app/schemas/photo_fit.py
+      - backend/app/schemas/cast.py
+      - backend/app/schemas/footage.py
+      - backend/app/schemas/prompt_package.py
+      - frontend/src/components/images/**
+      - frontend/src/pages/pipeline/ImageStagePage.tsx
+      - frontend/src/lib/prompts/image*
+      - frontend/src/lib/imageDegradation*.ts
+      - frontend/src/lib/imageStagePersisted.test.tsx
+      - frontend/src/lib/sceneAsset*.ts
+      - frontend/src/lib/sceneReadiness*.ts
+      - frontend/src/lib/castSeams*.ts
+      - backend/tests/test_images.py
+      - backend/tests/test_cast.py
+      - backend/tests/test_photo_*.py
+      - backend/tests/test_scene_image.py
+      - backend/tests/test_scene_asset_preservation.py
+      - backend/tests/test_footage_*.py
+      - backend/tests/test_asset_pool.py
+      - backend/tests/test_render.py
+      - backend/tests/calibration/corpus.py
+      - backend/tests/calibration/images/**
+      - backend/scripts/export_image_fragments.py
+      - backend/scripts/gen_cluster_lexicon.py
+
+  video-cost:
+    description: >-
+      FUSED. Motion rendering and what it costs. An A100 render is the only
+      genuinely expensive call in the product, so the credit ledger, the spend
+      cap, the blob GC and the reversal path move with the renderer that spends
+      them. Separated, the cost lane owns a meter for a thing it cannot change.
+    owner: senior
+    allow:
+      - backend/app/stages/video/**
+      - backend/app/providers/video_*.py
+      - backend/app/infra/wan_runtime.py
+      - backend/app/infra/video_probe.py
+      - backend/app/infra/clip_history.py
+      - backend/app/infra/blob_*.py
+      - backend/app/infra/storage_keys.py
+      - backend/app/pipeline/credits.py
+      - backend/app/db/credits.py
+      - backend/app/schemas/video.py
+      - backend/app/schemas/credits.py
+      - frontend/src/pages/pipeline/VideoPage.tsx
+      - frontend/src/lib/video*.ts
+      - frontend/src/lib/clipFreshness*.ts
+      - frontend/src/lib/film*.ts
+      - backend/tests/test_video*.py
+      - backend/tests/test_blob_*.py
+      - backend/tests/test_credits.py
+      - backend/tests/test_credits_tail.py
+      - backend/tests/test_storage_concurrency.py
+      - backend/tests/test_clip_duration_freshness.py
+      - backend/tests/test_take_over_motion.py
+      - backend/scripts/blob_gc.py
+      - backend/scripts/recover_wiped_blobs.py
+
+  assembly:
+    description: >-
+      The final cut: ffmpeg graph, montage, loudness, the Studio timeline and
+      trim. Owns the RENDER of on-screen text; `captions` owns the DECISION.
+    owner: senior
+    allow:
+      - backend/app/stages/assembly/**
+      - backend/app/stages/editor/**
+      - backend/app/providers/assembly_modal_ffmpeg.py
+      - backend/app/infra/assembly_graph.py
+      - backend/app/infra/ffmpeg_runtime.py
+      - backend/app/infra/audio_loudness.py
+      - backend/app/infra/sound_layer.py
+      - backend/app/pipeline/timing.py
+      - backend/app/schemas/assembly.py
+      - backend/app/schemas/editor.py
+      - frontend/src/pages/pipeline/AssemblyPage.tsx
+      - frontend/src/pages/StudioPage.tsx
+      - frontend/src/lib/studio*.ts
+      - frontend/src/lib/editorErrors.ts
+      - backend/tests/test_assembly*.py
+      - backend/tests/test_sound_layer.py
+      - backend/tests/test_beat_over_stills.py
+      - backend/tests/test_editor.py
+
+  captions:
+    description: >-
+      On-screen text: caption policy, style, speaker attribution, callout
+      overlays and their length caps.
+    owner: junior
+    allow:
+      - backend/app/infra/caption_*.py
+      - backend/app/infra/overlay_*.py
+      - frontend/src/lib/caption*.ts
+      - frontend/src/lib/overlaySeams*.ts
+      - frontend/src/lib/textLimits*.ts
+      - frontend/src/lib/textLimits*.tsx
+      - frontend/src/lib/sceneTextWriters*.ts
+      - backend/tests/test_caption_*.py
+      - backend/tests/test_overlay_*.py
+
+  music:
+    description: >-
+      The music bed — generation, the track library, the picker, and the
+      licensing decision that currently blocks all three.
+    owner: junior
+    allow:
+      - backend/app/infra/music_*.py
+      - backend/app/infra/acestep_runtime.py
+      - backend/app/providers/music_modal_acestep.py
+      - backend/app/schemas/music.py
+      - frontend/src/components/pipeline/MusicBedControl.tsx
+      - frontend/src/lib/musicSeams*.ts
+      - backend/tests/test_music_*.py
+      - backend/scripts/music_*.py
+      - docs/decisions/music-*.md
+    # NOTE: all three open tickets in this lane are decisions, not diffs ("can a
+    # free source be sublicensed into a customer's paid ad?"). The lane exists to
+    # hold an answer. `docs/decisions/**` is where that answer lands, so the lane
+    # has somewhere to write even when it writes no code.
+
+  ad-format:
+    description: >-
+      What KIND of ad this is — monologue, dialogue, podcast — and the hook that
+      opens it. Cuts across script, voice, captions and assembly by design; owns
+      only the decision surface, and escalates into the stages it steers.
+    owner: senior
+    allow:
+      - backend/app/infra/ad_format_decision.py
+      - backend/app/prompts/ad_format.yaml
+      - frontend/src/components/setup/AdFormatRow.*
+      - frontend/src/components/setup/AdHookSelector.*
+      - frontend/src/hooks/useAdFormat.ts
+      - frontend/src/lib/adFormat*.ts
+      - frontend/src/lib/hookOrder.test.ts
+      - backend/tests/test_ad_format.py
+
+  qc:
+    description: >-
+      The gate that judges the deliverable — visual, temporal and audio checks,
+      scoring, calibration, and the publish-ready rubric.
+    owner: senior
+    allow:
+      - backend/app/stages/qc/**
+      - backend/app/prompts/qc_video.yaml
+      - backend/app/domain/scoring.py
+      - backend/app/schemas/qc.py
+      - backend/app/schemas/video_qc.py
+      - frontend/src/components/pipeline/QC*.tsx
+      - frontend/src/pages/pipeline/QCCheckPage.tsx
+      - frontend/src/lib/qc*.ts
+      - frontend/src/lib/publishReadyRubric*.ts
+      - backend/tests/test_qc*.py
+      - backend/tests/calibration/golden.json
+      - backend/tests/test_no_fallback_content.py
+      - backend/scripts/qc_*.py
+
+  versioning:
+    description: >-
+      The album, the pin and the take-picker. Non-destructive editing across
+      every stage: forks, variants, stage versions, prune guards.
+    owner: senior
+    allow:
+      - backend/app/api/stage_versions.py
+      - backend/app/api/version_mint.py
+      - backend/app/api/take_select.py
+      - backend/app/api/prune_guard.py
+      - backend/app/db/stage_versions.py
+      - backend/app/infra/version_history.py
+      - backend/app/schemas/stage_version.py
+      - frontend/src/components/pipeline/AlbumPin.tsx
+      - frontend/src/components/pipeline/ForkButton.tsx
+      - frontend/src/components/pipeline/QuickForkModal.tsx
+      - frontend/src/components/pipeline/TakePicker.tsx
+      - frontend/src/components/pipeline/VariantSwitcher.tsx
+      - frontend/src/components/pipeline/PruneWarningModal.tsx
+      - frontend/src/components/pipeline/StageInputGate.tsx
+      - frontend/src/hooks/useStageVersions.ts
+      - frontend/src/hooks/useProjectVariants.ts
+      - frontend/src/hooks/usePruneConfirm.ts
+      - frontend/src/hooks/useForkInheritedStage.ts
+      - frontend/src/hooks/useStageGate.ts
+      - frontend/src/hooks/useSceneDeepLink.ts
+      - frontend/src/lib/stageVersions*.ts
+      - frontend/src/lib/stageVersions*.tsx
+      - frontend/src/lib/sceneTakes*.ts
+      - frontend/src/lib/take*.ts
+      - frontend/src/lib/take*.tsx
+      - frontend/src/lib/prune*.ts
+      - frontend/src/lib/prune*.tsx
+      - backend/tests/test_stage_versions.py
+      - backend/tests/test_take_*.py
+      - backend/tests/test_version_history.py
+      - backend/tests/test_prune_guard.py
+
+  # ------------------------------------------------------------ cross-cutting --
+
+  orchestration:
+    description: >-
+      The conductor seam: stage claims, the reclaim CAS race, the credits gate,
+      advance(), the provider registry, rate limiting. Steward of the shared
+      pipeline spine — it is the lane other lanes escalate TO.
+    owner: senior
+    allow:
+      - backend/app/api/advance.py
+      - backend/app/api/_shared.py
+      - backend/app/api/project_delete.py
+      - backend/app/pipeline/claims.py
+      - backend/app/pipeline/fingerprint.py
+      - backend/app/pipeline/orphan_sweep.py
+      - backend/app/jobs/**
+      - backend/app/infra/startup.py
+      - backend/app/infra/rate_limit.py
+      - backend/app/db/registry.py
+      - backend/app/providers/modal_call.py
+      - backend/app/providers/llm_*.py
+      - backend/tests/test_conductor.py
+      - backend/tests/test_stage_isolation.py
+      - backend/tests/test_artifact_claim_guard.py
+      - backend/tests/test_registry.py
+      - backend/tests/test_orphan_sweep.py
+      - backend/tests/test_project_delete.py
+      - backend/tests/test_modal_call.py
+      - backend/tests/test_llm_*.py
+      - backend/tests/test_rate_limit.py
+      - backend/tests/test_health.py
+      - backend/tests/test_log_capture.py
+      - backend/scripts/verify_stage_versions.py
+      - backend/scripts/dump_*_columns.py
+      - backend/scripts/export_contracts.py
+      - backend/scripts/build_record_index.py
+      - backend/scripts/deploy_modal.py
+
+  auth:
+    description: >-
+      Who may see and spend what: JWT, ownership, workspace and org membership,
+      RLS, share tokens, Stripe entitlement. Fails closed; every finding here is
+      a security finding.
+    owner: senior
+    allow:
+      - backend/app/auth/**
+      - backend/app/api/billing.py
+      - backend/app/api/share_assets.py
+      - backend/app/db/billing.py
+      - backend/app/db/shares.py
+      - backend/app/providers/billing_stripe.py
+      - backend/app/schemas/billing.py
+      - backend/app/infra/crypto.py
+      - frontend/src/store/authStore.*
+      - frontend/src/store/orgStore.ts
+      - frontend/src/store/workspaceStore.ts
+      - frontend/src/hooks/useAuth.ts
+      - frontend/src/pages/AuthPage.tsx
+      - frontend/src/pages/OAuthCallbackPage.tsx
+      - frontend/src/pages/org/**
+      - frontend/src/lib/supabase.ts
+      - frontend/src/lib/billing*.tsx
+      - frontend/src/lib/creditsAreServerOwned.test.ts
+      - frontend/src/lib/stripeColumnsAreServerOwned.test.ts
+      - backend/tests/_rls_policy_scan.py
+      - backend/tests/test_billing_*.py
+      - backend/tests/test_share_*.py
+      - backend/tests/test_credits_are_server_owned.py
+      - backend/tests/test_workspace_authz_is_scanned.py
+      - backend/tests/test_insert_rls_binds_auth_uid.py
+      - backend/tests/test_definer_functions_pin_search_path.py
+      - backend/tests/test_guard_profiles_migration.py
+      - backend/tests/test_guard_trigger_migrations.py
+
+  frontend:
+    description: >-
+      Everything the pipeline lanes do NOT own: the landing page, dashboard,
+      projects and campaigns, settings, admin, the shared UI kit. NOTE this is the
+      one lane named for a layer, and it is a residue, not a design — it is the
+      part of the app that has no pipeline stage behind it. It is also the lane
+      with the most tickets, which is a standing argument for splitting it.
+    owner: junior
+    allow:
+      - frontend/src/components/ui/**
+      - frontend/src/components/layout/**
+      - frontend/src/components/landing/**
+      - frontend/src/components/campaign/**
+      - frontend/src/components/admin/**
+      - frontend/src/components/common/**
+      - frontend/src/components/pipeline/ShareReview*.tsx
+      - frontend/src/pages/LandingPage.tsx
+      - frontend/src/pages/DashboardPage.tsx
+      - frontend/src/pages/Projects*.tsx
+      - frontend/src/pages/ProjectDetailPage.*
+      - frontend/src/pages/NewProjectPage.tsx
+      - frontend/src/pages/Campaign*.tsx
+      - frontend/src/pages/NewCampaignPage.tsx
+      - frontend/src/pages/ClientCampaignPreviewPage.tsx
+      - frontend/src/pages/ShareReviewPage.tsx
+      - frontend/src/pages/SettingsPage.tsx
+      - frontend/src/pages/OnboardingPage.tsx
+      - frontend/src/pages/AdminPage.tsx
+      - frontend/src/pages/BillingPage.tsx
+      - frontend/src/lib/adminSettings.ts
+      - frontend/src/lib/campaignVideoStatus*.ts
+      - frontend/src/lib/shareImages*.ts
+      - frontend/src/lib/shareReadPath.test.ts
+      - frontend/src/lib/controlHonesty*.ts
+      - frontend/src/lib/controlHonesty*.tsx
+      - frontend/src/lib/commercialPageWiring.test.tsx
+      - frontend/src/lib/noLocalFallback.test.ts
+      - frontend/src/lib/planActions*.ts
+      - frontend/src/lib/planDirectionWiring.test.tsx
+      - frontend/src/lib/regenerateAll.test.tsx
+      - frontend/src/index.css
+      - frontend/public/**
+      - backend/app/api/campaign_export.py
+      - backend/tests/test_campaign_export.py
+
+  research:
+    description: >-
+      Work that produces a decision, a benchmark or a spike — not a diff. Blind
+      quality tests, vendor bake-offs, avatar and lip-sync parity, the
+      differentiation bet. Deliberately has no source paths.
+    owner: senior
+    allow:
+      - docs/strategy-backlog.md
+      - docs/differentiation.md
+      - docs/decisions/**
+      - docs/product-v2/**
+      - docs/G_Implementation/**
+      - docs/_archive/**
+      - docs/*.md
+      - benchmarks/**
+    # NOTE: a lane with no code is still a lane. It holds a seat, takes tickets
+    # and blocks other lanes until it answers. `check` should pass a PR that
+    # changes only prose, and refuse one that quietly ships the spike it was
+    # supposed to be deciding about.
+
+  new-files:
+    description: >-
+      The greenfield lane. Whole subsystems that do not exist yet — the Stripe
+      payment path, the publish-ready output package, distribution and publish.
+      Holds every path no other lane claims.
+    owner: senior
+    claims: unowned
+    # NOTE: this is the lane the original #34 schema could not express. Path globs
+    # name files that exist; the work here is defined by what is ABSENT. Without
+    # `claims: unowned`, every new module is either a coverage warning or an
+    # invented escalation. `backend/app/stages/distribution/**` is unclaimed above
+    # on purpose, to show what lands here.
+
+
+# ------------------------------------------------------------------- shared --
+# Nobody may take a shared zone as their lane. A `steward` is the lane that may
+# edit it without escalation and to whom every other lane escalates — because
+# "nobody owns it" is not survivable on a file that sixteen lanes must touch.
+
+shared:
+
+  pipeline-spine:
+    description: >-
+      Where every stage plugs in. A stage lane registering itself here is the
+      single most common escalation in the project.
+    steward: orchestration
+    mode: escalate
+    paths:
+      - backend/app/main.py
+      - backend/app/pipeline/conductor.py
+      - backend/app/config/platform.yaml
+      - backend/app/config/product.yaml
+      - backend/app/config/loader.py
+      - backend/app/config/limits.py
+      - backend/app/db/projects.py
+      - backend/app/db/client.py
+      - backend/app/providers/registry.py
+      - backend/app/providers/base.py
+      - backend/app/providers/__init__.py
+      - backend/app/domain/errors.py
+      - backend/app/infra/logging.py
+      - backend/app/infra/tracing.py
+      - backend/app/health.py
+      - backend/app/validators/**
+      - backend/app/prompts/loader.py
+      - backend/app/providers/storage_supabase.py
+      - backend/app/providers/README.md
+      - backend/app/infra/hf_auth.py
+      # The package roots. A new stage's own __init__.py is covered by its lane's
+      # directory glob; these six are not, and fall to nobody without naming them.
+      - backend/app/__init__.py
+      - backend/app/api/__init__.py
+      - backend/app/config/__init__.py
+      - backend/app/db/__init__.py
+      - backend/app/domain/__init__.py
+      - backend/app/infra/__init__.py
+      - backend/app/pipeline/__init__.py
+      - backend/app/schemas/__init__.py
+      - backend/app/stages/__init__.py
+      - backend/tests/__init__.py
+      - backend/tests/conftest.py
+      - backend/tests/test_config*.py
+
+  api-contract:
+    description: >-
+      The typed boundary. Changing an enum or an envelope shape breaks every lane
+      at once, so it changes by escalation and in one commit.
+    steward: orchestration
+    mode: escalate
+    paths:
+      - backend/app/schemas/_base.py
+      - backend/app/schemas/api.py
+      - backend/app/schemas/enums.py
+      - backend/app/schemas/jobs.py
+      - backend/app/schemas/stage_state.py
+      - backend/app/schemas/distribution.py
+      - docs/contracts/**
+      - backend/tests/test_schemas.py
+      - backend/tests/test_contract_export_is_current.py
+      - backend/tests/test_build_record_index_is_current.py
+
+  frontend-shell:
+    description: >-
+      Routing and the app frame. Every stage lane adds a route; none of them may
+      reorder someone else's.
+    steward: frontend
+    mode: escalate
+    paths:
+      - frontend/src/App.tsx
+      - frontend/src/main.tsx
+      - frontend/src/types/**
+      - frontend/src/components/pipeline/PipelineStepper.tsx
+      - frontend/src/hooks/usePipelineNav.ts
+      - frontend/src/hooks/usePipelineCompletedStages.*
+      - frontend/src/hooks/useAutoAdvance.ts
+      - frontend/src/hooks/useUnsavedEdits.*
+      - frontend/src/lib/backendApi.*
+      - frontend/src/lib/constants.ts
+      - frontend/src/lib/utils.*
+      - frontend/src/lib/storageKey.*
+      - frontend/src/lib/apiWiring.test.ts
+      - frontend/src/lib/endpointUrlWiring.test.ts
+      - frontend/src/test-setup.ts
+
+  project-state:
+    description: >-
+      The client-side project record — the typed field-to-column map every stage
+      page writes through. NOTE the zone is file-precise, not
+      `frontend/src/store/**`, because `auth` legitimately owns three stores in
+      the same directory. A shared zone that swallows a whole folder makes its
+      neighbour escalate for its own files.
+    steward: frontend
+    mode: escalate
+    paths:
+      - frontend/src/store/projectStore.*
+      - frontend/src/store/projectColumns.*
+      - frontend/src/store/projectRoundTrip.test.ts
+      - frontend/src/store/campaignStore.ts
+      - frontend/src/store/campaignColumns.*
+      - frontend/src/store/sceneWriteMerge.test.ts
+      - frontend/src/store/updateProjectBoundary.test.ts
+
+  migrations:
+    description: >-
+      Ten of the seventeen lanes ship SQL. Filenames are timestamped, so new files
+      never collide — but editing an applied migration corrupts every checkout.
+      Adding a file is free; touching an existing one is an escalation.
+    mode: append_only
+    paths:
+      - supabase/migrations/**
+      - backend/scripts/migrations/**
+
+  feature-docs:
+    description: One file per feature, written by whichever lane built it.
+    mode: append_only
+    paths:
+      - docs/features/**
+
+  build-and-ci:
+    description: Dependencies, lint config, CI, secrets policy, the dev bootstrap.
+    steward: orchestration
+    mode: escalate
+    paths:
+      - Makefile
+      - package.json
+      - scripts/ci.sh
+      - .github/**
+      - .pre-commit-config.yaml
+      - .githooks/**
+      - .gitleaks.toml
+      - .env.example
+      - .gitattributes
+      - .gitignore
+      - backend/pyproject.toml
+      - backend/requirements*.txt
+      - backend/scripts/dev_server.py
+      - frontend/package.json
+      - frontend/package-lock.json
+      - frontend/tsconfig*.json
+      - frontend/vite.config.ts
+      - frontend/vitest.config.ts
+      - frontend/tailwind.config.js
+      - frontend/postcss.config.js
+      - frontend/index.html
+      - frontend/.npmrc
+      - frontend/.nvmrc
+      - frontend/src/vite-env.d.ts
+      - supabase/config.toml
+      - supabase/.gitignore
+      - write_migration.js
+
+  project-spine:
+    description: >-
+      The documents that describe the product to every agent. Three of them are
+      byte-identical entry points for three harnesses; they drift the moment one
+      lane edits one of them.
+    mode: escalate
+    paths:
+      - CLAUDE.md
+      - AGENTS.md
+      - GEMINI.md
+      - PRODUCT.md
+      - STRUCTURE.md
+      - DESIGN.md
+      - README.md
+      - CHANGELOG.md
+      - SECURITY.md
+      - CONTRIBUTING.md
+      - docs/WORKING-AGREEMENT.md
+      - docs/sdlc/**
+      - docs/playbook/**
+      # The harness entry points. Every harness reads its own file and they are
+      # meant to say the same thing; one lane editing one is how they diverge.
+      - .claude/**
+      - .agents/**
