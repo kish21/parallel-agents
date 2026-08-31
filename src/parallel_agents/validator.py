@@ -1,4 +1,4 @@
-"""Validation runner for lane compliance and quality commands."""
+"""Validation runner for lane compliance, capability gates, and quality commands."""
 
 from __future__ import annotations
 
@@ -6,9 +6,16 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
-from .config import Config, LaneConfig, UnknownLaneError
+
+from .capabilities import (
+    CapabilityCard,
+    CapabilityRegistry,
+    CapabilityState,
+    UnknownSeatError,
+)
+from .config import Config, UnknownLaneError
 from .lanes import LaneEngine, LaneValidationResult
-from .state import AgentState, StateManager
+from .state import StateManager
 from .worktree import WorktreeManager
 
 
@@ -19,6 +26,17 @@ class QualityCommandResult:
     stdout: str
     stderr: str
     passed: bool
+    satisfies: Optional[str] = None
+
+
+@dataclass
+class CapabilityViolation:
+    """A file the seat is not competent to have modified."""
+
+    filepath: str
+    capability: str
+    state: str
+    detail: str
 
 
 @dataclass
@@ -29,7 +47,10 @@ class ValidationReport:
     is_valid: bool
     worktree_valid: bool
     lane_result: LaneValidationResult
+    seat: str = ""
     quality_results: List[QualityCommandResult] = field(default_factory=list)
+    capability_violations: List[CapabilityViolation] = field(default_factory=list)
+    gates_evaluated: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
 
 
@@ -39,10 +60,114 @@ class Validator:
         config: Config,
         state: StateManager,
         worktree_mgr: WorktreeManager,
+        capabilities: Optional[CapabilityRegistry] = None,
     ):
         self.config = config
         self.state = state
         self.worktree_mgr = worktree_mgr
+        # Loaded lazily from the worktree manager's root so existing callers keep working.
+        self.capabilities = (
+            capabilities
+            if capabilities is not None
+            else CapabilityRegistry.load(self.worktree_mgr.root_dir)
+        )
+
+    # ---------------------------------------------------------------- helpers
+
+    @staticmethod
+    def _matches_any(path: str, patterns: List[str]) -> Optional[str]:
+        """Returns the first matching pattern, or None.
+
+        A pattern ending in '/' is a directory prefix (the form used by the card examples
+        in 03-orchestration.md), so it is expanded to a recursive glob.
+        """
+        for pattern in patterns:
+            expanded = pattern[:-1] + "/**" if pattern.endswith("/") else pattern
+            if LaneEngine.match_glob(path, expanded):
+                return pattern
+        return None
+
+    def _run_quality_commands(self) -> List[QualityCommandResult]:
+        results: List[QualityCommandResult] = []
+        for cmd in self.config.quality.commands:
+            try:
+                res = subprocess.run(
+                    cmd.command, cwd=self._cwd, shell=True,
+                    capture_output=True, text=True, timeout=300,
+                )
+                results.append(QualityCommandResult(
+                    command=cmd.command, exit_code=res.returncode,
+                    stdout=(res.stdout or "").strip(), stderr=(res.stderr or "").strip(),
+                    passed=res.returncode == 0, satisfies=cmd.satisfies,
+                ))
+            except Exception as e:
+                results.append(QualityCommandResult(
+                    command=cmd.command, exit_code=-1, stdout="", stderr=str(e),
+                    passed=False, satisfies=cmd.satisfies,
+                ))
+        return results
+
+    def _capability_satisfied_by_script(
+        self, capability: str, quality_results: List[QualityCommandResult]
+    ) -> bool:
+        """True when a verified script for this capability ran and passed.
+
+        This is what `author-required` means operationally: the harness may proceed
+        because a procedure written for it was executed, not because it improvised one.
+        """
+        relevant = [q for q in quality_results if q.satisfies == capability]
+        return bool(relevant) and all(q.passed for q in relevant)
+
+    def _check_capabilities(
+        self,
+        card: CapabilityCard,
+        changed_files: List[str],
+        quality_results: List[QualityCommandResult],
+    ) -> List[CapabilityViolation]:
+        violations: List[CapabilityViolation] = []
+
+        for filepath in changed_files:
+            # 1. Per-seat forbidden paths override everything, including the lane's allow.
+            forbidden = self._matches_any(filepath, card.forbidden_paths)
+            if forbidden:
+                violations.append(CapabilityViolation(
+                    filepath=filepath, capability="(forbidden_paths)", state="forbidden",
+                    detail=f"seat '{card.seat}' declares this path forbidden "
+                           f"(matched '{forbidden}')",
+                ))
+                continue
+
+            # 2. Capability gates.
+            for name, gate in sorted(self.config.capability_gates.items()):
+                if not self._matches_any(filepath, gate.paths):
+                    continue
+                state = card.state_for(name)
+
+                if state is CapabilityState.NATIVE:
+                    continue
+
+                if state is CapabilityState.AUTHOR_REQUIRED:
+                    if self._capability_satisfied_by_script(name, quality_results):
+                        continue
+                    violations.append(CapabilityViolation(
+                        filepath=filepath, capability=name, state=state.value,
+                        detail=f"seat '{card.seat}' is author-required for '{name}' and no "
+                               f"verified script satisfying it passed. Add a quality command "
+                               f"with `satisfies: {name}`, or escalate to a native seat.",
+                    ))
+                    continue
+
+                # UNAVAILABLE — the hard stop.
+                undeclared = "" if card.declares(name) else " (capability not rated on the card)"
+                violations.append(CapabilityViolation(
+                    filepath=filepath, capability=name, state=state.value,
+                    detail=f"seat '{card.seat}' cannot perform '{name}'{undeclared}. "
+                           f"This change must be escalated to a seat rated native for it.",
+                ))
+
+        return violations
+
+    # ------------------------------------------------------------------ main
 
     def validate_agent(self, agent_id_or_name: str) -> ValidationReport:
         agent = self.state.get_agent(agent_id_or_name)
@@ -50,98 +175,85 @@ class Validator:
             raise ValueError(f"Agent '{agent_id_or_name}' not found.")
 
         worktree_path = Path(agent.worktree_path)
+        self._cwd = worktree_path
         worktree_valid = worktree_path.exists()
         errors: List[str] = []
 
-        if not worktree_valid:
-            errors.append(f"Worktree path does not exist: {worktree_path}")
-            lane_res = LaneValidationResult(lane_name=agent.lane, is_valid=False)
+        def failed(lane_result=None, **extra):
             return ValidationReport(
-                agent_id=agent.id,
-                agent_name=agent.name,
-                lane=agent.lane,
-                is_valid=False,
-                worktree_valid=False,
-                lane_result=lane_res,
-                errors=errors,
+                agent_id=agent.id, agent_name=agent.name, lane=agent.lane, seat=agent.seat,
+                is_valid=False, worktree_valid=worktree_valid,
+                lane_result=lane_result or LaneValidationResult(lane_name=agent.lane, is_valid=False),
+                errors=errors, **extra,
             )
 
-        # 1. Lane Path Validation
-        #
-        # An agent carrying a lane that is not declared in the configuration cannot be
-        # validated at all: there is no policy to check it against. Report that as a
-        # failure. Substituting an empty allow/deny lane here would silently pass every
-        # file, turning a config typo into a total loss of lane enforcement.
+        if not worktree_valid:
+            errors.append(f"Worktree path does not exist: {worktree_path}")
+            return failed()
+
+        # 1. Lane path validation. An agent carrying a lane that is not declared cannot be
+        #    validated at all — substituting an empty policy would pass every file.
         try:
             lane_config = self.config.get_lane(agent.lane)
         except UnknownLaneError as e:
-            errors.append(
-                f"{e} Agent '{agent.id}' cannot be validated against an undeclared lane."
-            )
-            return ValidationReport(
-                agent_id=agent.id,
-                agent_name=agent.name,
-                lane=agent.lane,
-                is_valid=False,
-                worktree_valid=worktree_valid,
-                lane_result=LaneValidationResult(lane_name=agent.lane, is_valid=False),
-                errors=errors,
-            )
+            errors.append(f"{e} Agent '{agent.id}' cannot be validated against an undeclared lane.")
+            return failed()
 
         changed_files = self.worktree_mgr.get_changed_files(worktree_path)
         lane_result = LaneEngine.validate_files(changed_files, lane_config)
 
-        if not lane_result.is_valid:
-            for v in lane_result.violations:
-                if v.reason == "denied":
-                    errors.append(f"Forbidden file modified (matched deny pattern '{v.matched_pattern}'): {v.filepath}")
-                else:
-                    errors.append(f"Out-of-lane file modified (not in allowed paths for lane '{agent.lane}'): {v.filepath}")
+        for v in lane_result.violations:
+            if v.reason == "denied":
+                errors.append(
+                    f"Forbidden file modified (matched deny pattern '{v.matched_pattern}'): {v.filepath}")
+            else:
+                errors.append(
+                    f"Out-of-lane file modified (not in allowed paths for lane '{agent.lane}'): {v.filepath}")
 
-        # 2. Quality Commands Execution
-        quality_results: List[QualityCommandResult] = []
-        for cmd in self.config.quality.commands:
+        # 2. Quality commands.
+        quality_results = self._run_quality_commands()
+        for q in quality_results:
+            if not q.passed:
+                errors.append(f"Quality command failed ('{q.command}'): exit code {q.exit_code}")
+
+        # 3. Capability gates.
+        #
+        # Gating applies only where the operator declared gates. If none are configured
+        # there is nothing to enforce. But once gates exist, a seat without a card fails
+        # closed: an unevaluable seat must not pass a gated path.
+        capability_violations: List[CapabilityViolation] = []
+        gates_evaluated: List[str] = []
+
+        if self.config.capability_gates:
+            gates_evaluated = sorted(self.config.capability_gates)
             try:
-                res = subprocess.run(
-                    cmd,
-                    cwd=worktree_path,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
+                card = self.capabilities.get(agent.seat)
+            except UnknownSeatError as e:
+                errors.append(
+                    f"{e} Capability gates are configured ({', '.join(gates_evaluated)}), so "
+                    f"agent '{agent.id}' cannot be validated without a card for its seat."
                 )
-                q_passed = (res.returncode == 0)
-                quality_results.append(
-                    QualityCommandResult(
-                        command=cmd,
-                        exit_code=res.returncode,
-                        stdout=res.stdout.strip(),
-                        stderr=res.stderr.strip(),
-                        passed=q_passed,
-                    )
-                )
-                if not q_passed:
-                    errors.append(f"Quality command failed ('{cmd}'): exit code {res.returncode}")
-            except Exception as e:
-                quality_results.append(
-                    QualityCommandResult(
-                        command=cmd,
-                        exit_code=-1,
-                        stdout="",
-                        stderr=str(e),
-                        passed=False,
-                    )
-                )
-                errors.append(f"Quality command error ('{cmd}'): {e}")
+                return failed(lane_result=lane_result, quality_results=quality_results,
+                              gates_evaluated=gates_evaluated)
 
-        overall_valid = (len(errors) == 0) and lane_result.is_valid and worktree_valid
+            # Lane scope is part of the card's contract.
+            if not card.allows_lane(agent.lane):
+                errors.append(
+                    f"Seat '{agent.seat}' is not permitted in lane '{agent.lane}' "
+                    f"(max_allowed_lane_scope: {', '.join(card.max_allowed_lane_scope)})."
+                )
+
+            capability_violations = self._check_capabilities(
+                card, lane_result.allowed_files + [v.filepath for v in lane_result.violations],
+                quality_results,
+            )
+            for cv in capability_violations:
+                errors.append(f"Capability gate '{cv.capability}' on {cv.filepath}: {cv.detail}")
+
+        overall_valid = not errors and lane_result.is_valid and worktree_valid
         return ValidationReport(
-            agent_id=agent.id,
-            agent_name=agent.name,
-            lane=agent.lane,
-            is_valid=overall_valid,
-            worktree_valid=worktree_valid,
-            lane_result=lane_result,
-            quality_results=quality_results,
-            errors=errors,
+            agent_id=agent.id, agent_name=agent.name, lane=agent.lane, seat=agent.seat,
+            is_valid=overall_valid, worktree_valid=worktree_valid, lane_result=lane_result,
+            quality_results=quality_results, capability_violations=capability_violations,
+            gates_evaluated=gates_evaluated, errors=errors,
         )

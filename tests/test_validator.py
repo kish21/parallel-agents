@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from parallel_agents.capabilities import default_cards, save_card
 from parallel_agents.config import generate_default_config
 from parallel_agents.state import AgentState, StateManager
 from parallel_agents.validator import Validator
@@ -22,6 +23,11 @@ class TestValidator(unittest.TestCase):
         subprocess.run(["git", "commit", "-m", "init"], cwd=self.root, check=True)
 
         self.config = generate_default_config("ValidatorApp")
+        # Capability gates ship enabled, and a configured gate requires a card for every
+        # seat — validation fails closed without one. `init` writes these; a test that
+        # builds the config directly must provision them too.
+        for card in default_cards(sorted(self.config.lanes)):
+            save_card(card, self.root)
         self.state_mgr = StateManager(self.root)
         self.wt_mgr = WorktreeManager(self.root)
         self.validator = Validator(self.config, self.state_mgr, self.wt_mgr)

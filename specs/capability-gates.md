@@ -1,6 +1,7 @@
 # Spec — Capability Gates
 
-> **Status**: Draft for review. Nothing here is implemented.
+> **Status**: **Implemented** in v0.3.0 (phases 1–4). This document is now the design
+> record; behaviour is pinned by `tests/test_capability_gates.py`.
 > **Closes**: the gap between `03-orchestration.md` (capability cards, designed) and
 > `src/parallel_agents/` (lanes only, implemented).
 
@@ -180,7 +181,25 @@ Mirroring the fail-closed suite added in v0.2.0, since this is the same class of
 
 ---
 
-## 7. Open decisions — need your call
+## 7. Decisions taken
+
+These were open when the spec was drafted. Each was resolved as follows; reopen any of
+them by changing the code and the tests that pin it.
+
+1. **Gating with no cards present** — resolved without a fail-open default. Gating applies
+   only where `capability_gates` are configured; if none are, there is nothing to enforce.
+   Once gates *are* configured, a seat without a card fails closed. `init` writes both, so
+   a new repository is gated from the first spawn and the two can never drift apart.
+2. **Where cards live** — `.parallel-agents/capabilities/<seat>.json`, one file per seat,
+   so loosening a single seat is a visible one-file diff in review.
+3. **Whether this belongs here** — implemented here, because the README already implied
+   the CLI enforced it. Nothing in the implementation is repo-specific; if the phase-skills
+   repo should own the model, `capabilities.py` moves wholesale and this repo imports it.
+4. **`author-required` proof** — carried by the existing quality-command mechanism rather
+   than a new registry. A command may declare `satisfies: <capability>`; the gate passes
+   only if every command satisfying it ran and exited 0.
+
+## 8. Original open questions (historical)
 
 1. **Gating with no cards present.** Phase 2 breaks every existing repo unless validate
    skips gating when no cards exist at all. That is a fail-*open* default, which cuts

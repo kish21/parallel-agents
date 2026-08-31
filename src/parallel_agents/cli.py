@@ -17,6 +17,13 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from .adapters.process_adapter import ProcessAdapter
+from .capabilities import (
+    CapabilityRegistry,
+    CapabilityState,
+    UnknownSeatError,
+    default_cards,
+    save_card,
+)
 from .config import Config, UnknownLaneError, load_config, save_config
 from .doctor import Doctor
 from .environment import EnvironmentManager
@@ -49,9 +56,16 @@ def cmd_init(args: argparse.Namespace) -> int:
     (root / cfg.worktree_dir).mkdir(parents=True, exist_ok=True)
     gitignore_updated = ensure_gitignore(root)
 
+    # Capability gates are configured by default, and a configured gate requires a card
+    # for every seat — otherwise validation fails closed for want of one. Write the
+    # starter cards so the feature is usable and visible from the first spawn.
+    written_cards = [save_card(card, root) for card in default_cards(sorted(cfg.lanes))]
+
     print(f"✨ Initialized parallel-agents for '{project_name}'")
     print(f"📁 Configuration written to {config_file}")
     print(f"📁 Worktrees directory: {cfg.worktree_dir}")
+    print(f"🎫 Capability cards written for {len(written_cards)} seats: "
+          + ", ".join(c.stem for c in written_cards))
     if gitignore_updated:
         print("📝 Added parallel-agents rules to .gitignore (runtime state ignored, config tracked)")
     print("\n⚠️  Commit .parallel-agents/config.yaml — it is the lane policy every agent is validated against.")
@@ -185,6 +199,28 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print("   Add the lane to .parallel-agents/config.yaml, or spawn into an existing one.", file=sys.stderr)
         return 1
 
+    # A seat must have a capability card whenever gates are configured, and its card must
+    # permit the requested lane. Both are checked before anything is provisioned, so an
+    # impossible assignment fails at the point it is made rather than at review time.
+    registry = CapabilityRegistry.load(root)
+    default_seat = args.seat or "JR1"
+    if config.capability_gates:
+        if registry.is_empty:
+            print("❌ Capability gates are configured but no capability cards were found.", file=sys.stderr)
+            print("   Expected cards in .parallel-agents/capabilities/. Run 'parallel-agents init --force'", file=sys.stderr)
+            print("   to write the starter cards, or remove capability_gates from config.yaml.", file=sys.stderr)
+            return 1
+        try:
+            card = registry.get(default_seat)
+        except UnknownSeatError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if not card.allows_lane(args.lane):
+            scope = ", ".join(card.max_allowed_lane_scope) or "(none)"
+            print(f"❌ Seat '{default_seat}' is not permitted in lane '{args.lane}'. "
+                  f"Allowed lanes for this seat: {scope}.", file=sys.stderr)
+            return 1
+
     # Phase 1 (locked): reserve identity and ports. The placeholder agent record is
     # persisted inside the lock so a concurrent spawn immediately sees the ID as taken.
     try:
@@ -200,7 +236,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             name = args.name or f"worker-{int(idx_str)}"
             lane = args.lane
             task = args.task or "General development"
-            seat = args.seat or ("SR1" if "senior" in name.lower() else "JR1")
+            seat = args.seat or default_seat
             branch_name = worktree_mgr.make_branch_name(agent_id, task, config.git.branch_prefix)
 
             try:
@@ -402,12 +438,24 @@ def cmd_validate(args: argparse.Namespace) -> int:
         for v in report.lane_result.violations:
             print(f"    ✗ Violation: {v.filepath} (Reason: {v.reason})")
 
+    # Capability gates
+    if report.gates_evaluated:
+        print(f"\n  [Capability Gates] seat {report.seat} — evaluated: {', '.join(report.gates_evaluated)}")
+        if not report.capability_violations:
+            print("    ✓ No gated path was touched by a capability this seat lacks.")
+        else:
+            for cv in report.capability_violations:
+                print(f"    ✗ {cv.filepath}")
+                print(f"        requires '{cv.capability}' — seat is '{cv.state}'")
+                print(f"        {cv.detail}")
+
     # Quality commands
     if report.quality_results:
         print("\n  [Quality & Test Commands]")
         for q in report.quality_results:
             icon = "✓" if q.passed else "✗"
-            print(f"    {icon} {q.command} (Exit Code: {q.exit_code})")
+            tag = f" [satisfies: {q.satisfies}]" if q.satisfies else ""
+            print(f"    {icon} {q.command}{tag} (Exit Code: {q.exit_code})")
 
     # Always surface the error list. Some failure modes (an undeclared lane, a missing
     # worktree) produce no per-file violations, and printing nothing but "FAILED" left the
@@ -473,6 +521,72 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     if released:
         print(f"   Released ports: {', '.join(str(p) for p in released)}")
     return 0
+
+
+def cmd_declare(args: argparse.Namespace) -> int:
+    """Generates the PR gate declaration from recorded state.
+
+    The PR template asks the author to hand-write which gate they ran. Typing it is an
+    honour-system step; deriving it from the agent's seat, card, and actual command exit
+    codes makes it an artefact instead.
+    """
+    root = Path.cwd()
+    try:
+        config = load_config(root)
+        state_mgr = StateManager(root)
+        worktree_mgr = WorktreeManager(root)
+        registry = CapabilityRegistry.load(root)
+        validator = Validator(config, state_mgr, worktree_mgr, registry)
+    except Exception as e:
+        print(f"❌ Error loading project: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        report = validator.validate_agent(args.agent)
+    except Exception as e:
+        print(f"❌ Could not build declaration: {e}", file=sys.stderr)
+        return 1
+
+    card = registry.cards.get(report.seat)
+    harness = (card.vendor_harness if card and card.vendor_harness else "unspecified")
+
+    print(f"### Seat & Lane Information")
+    print(f"- **Seat**: {report.seat}")
+    print(f"- **Lane**: {report.lane}")
+    print(f"- **Harness**: {harness}")
+    print()
+    print("### Capability Gate Executed")
+    if not report.gates_evaluated:
+        print("- No capability gates are configured for this repository.")
+    else:
+        for name in report.gates_evaluated:
+            state = card.state_for(name).value if card else "no card"
+            triggered = [cv for cv in report.capability_violations if cv.capability == name]
+            mark = "x" if not triggered else " "
+            note = "" if not triggered else f" — BLOCKED on {len(triggered)} file(s)"
+            print(f"- [{mark}] `{name}` (seat rated: {state}){note}")
+    print()
+    print("### Gate Declaration")
+    print("```bash")
+    if not report.quality_results:
+        print("# No quality commands configured.")
+    for q in report.quality_results:
+        tag = f"   # satisfies: {q.satisfies}" if q.satisfies else ""
+        print(f"$ {q.command}{tag}")
+        print(f"exit {q.exit_code}")
+    print("```")
+    passed = sum(1 for q in report.quality_results if q.passed)
+    failed = len(report.quality_results) - passed
+    print(f"- **Checks Run**: {passed} Passed, {failed} Failed")
+    print(f"- **Lane Compliance**: {len(report.lane_result.allowed_files)} file(s) in lane, "
+          f"{len(report.lane_result.violations)} violation(s)")
+    print(f"- **Status**: {'Clean / All Passed' if report.is_valid else 'BLOCKED — see errors'}")
+    if report.errors:
+        print()
+        print("### Blocking Errors")
+        for e in report.errors:
+            print(f"- {e}")
+    return 0 if report.is_valid else 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -542,6 +656,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_val = subparsers.add_parser("validate", help="Validate lane boundaries and quality checks")
     p_val.add_argument("agent", help="Agent ID or name")
     p_val.set_defaults(func=cmd_validate)
+
+    # declare
+    p_dec = subparsers.add_parser("declare", help="Generate the PR gate declaration for an agent")
+    p_dec.add_argument("agent", help="Agent ID or name")
+    p_dec.set_defaults(func=cmd_declare)
 
     # cleanup
     p_cln = subparsers.add_parser("cleanup", help="Safely remove agent process, worktree, and ports")

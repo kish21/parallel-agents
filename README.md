@@ -248,6 +248,65 @@ error, never a lane that happens to allow every path.
 > commit.
 
 
+## Capability Gates
+
+A lane answers **where** a seat may work. A capability card answers **what kind of work it
+is competent to do there**.
+
+Each seat has a card declaring its capabilities in three states:
+
+| State | Meaning | Effect |
+|---|---|---|
+| `native` | The harness does this reliably. | Proceeds. |
+| `author-required` | It can, but only by running a procedure written for it. | Proceeds **only** if a quality command declaring `satisfies: <capability>` passed. |
+| `unavailable` | It cannot do this safely. | **Hard stop.** Non-zero exit; must escalate. |
+
+`config.yaml` maps paths to the capability they require:
+
+```yaml
+capability_gates:
+  security_review:
+    paths: ["**/auth/**", "**/payments/**", "**/tenant/**", "secrets/**"]
+  database_migrations:
+    paths: ["database/migrations/**", "migrations/**"]
+```
+
+So a junior seat rated `security_review: unavailable` cannot get a green validation on an
+auth file — **even when that file is inside its lane**:
+
+```
+  [Lane Compliance]
+    ✓ All 1 changed files are within allowed lane paths.
+
+  [Capability Gates] seat JR1 — evaluated: database_migrations, security_review
+    ✗ src/backend/auth/login.py
+        requires 'security_review' — seat is 'unavailable'
+        seat 'JR1' cannot perform 'security_review'. This change must be escalated
+        to a seat rated native for it.
+
+❌ VALIDATION FAILED: Must resolve errors before merging.
+```
+
+This is the mechanical form of the rule in `01-working-agreement.md`: stop when the change
+touches money, auth, tenant isolation, or a migration.
+
+### It fails closed, in four ways
+
+An unrecognised seat, a seat with no card, a capability the card does not rate, and a
+green-but-untagged quality command are **all denials**. Absence is never permission.
+
+### Generating the gate declaration
+
+`parallel-agents declare <agent>` produces the PR template's mandatory Gate Declaration
+from recorded state — the seat, its ratings, the gates triggered, and each quality command
+with its real exit code — rather than asking an author to type it from memory.
+
+> **What this does not do.** It does not verify that a `native` rating is *honest*. A
+> rating is a claim by the seat's owner; the tool holds the claim in one place, refuses
+> work the claim says the seat cannot do, and makes the declaration an artefact.
+> Rating honesty stays a human review question.
+
+
 ## Ports
 
 Parallel development servers need independent ports. Instead of hardcoding `8000`:
@@ -409,6 +468,7 @@ The orchestration layer handles isolation, ports, and validation; the adapter ha
 | **`parallel-agents stop`** | Stops an active agent process. |
 | **`parallel-agents restart`** | Restarts an agent in its worktree. |
 | **`parallel-agents repair`** | Repairs stale states and releases orphaned ports. |
+| **`parallel-agents declare`** | Generates the PR gate declaration from recorded state. |
 | **`parallel-agents cleanup`** | Safely removes worktrees and releases port allocations. |
 
 ---
@@ -445,7 +505,7 @@ python -m unittest discover tests
 ```
 ....................................
 ----------------------------------------------------------------------
-Ran 70 tests in 8.1s
+Ran 108 tests in 13.2s
 
 OK
 ```
@@ -458,6 +518,8 @@ OK
 * **Port Audit & Conflict Detection (`test_ports.py`, `test_port_audit.py`, `test_port_conflicts.py`)**: Validates real OS socket probing (a bound socket is detected and skipped by the allocator), ledger/agent-state drift detection, leaked-server reporting on orphaned ports, and that a failed re-allocation never releases the agent's existing reservations.
 * **Fail-Closed Lane Enforcement (`test_lane_fail_closed.py`)**: Proves that an undeclared lane — a typo at spawn, or a lane deleted from the config afterwards — is rejected outright rather than validating as safe, and that a rejected spawn leaves behind no branch, worktree, or port reservation.
 * **Environment Injection (`test_env_injection.py`)**: Round-trips hostile task strings (quotes, newlines, `$VAR`, backticks, `$(...)`) through a real `/bin/sh` to prove generated `.env` and `.lane` files cannot be escaped or executed.
+* **Capability Gates (`test_capability_gates.py`)**: Proves an `unavailable` capability hard-stops an in-lane file, `native` passes the same file, `author-required` passes only when its verified script exits 0, `forbidden_paths` overrides the lane allow, and four separate fail-closed paths (unknown seat, missing card, unrated capability, untagged command).
+* **Glob Matching (`test_glob_matching.py`)**: Pins segment-aware `**` semantics, including that `**/auth/**` must not match `src/authentic/`, and that a recursive deny pattern actually denies.
 * **Repository Hygiene (`test_init_gitignore.py`)**: Proves `git add -A` cannot stage agent worktrees or runtime state, while the shared lane policy stays tracked.
 * **Diagnostics & Recovery (`test_doctor.py`, `test_cleanup.py`)**: Validates automatic detection of missing worktrees, orphaned port reclamation, and uncommitted developer code protection.
 

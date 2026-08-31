@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.3.0] - 2026-08-31
+
+Implements capability gates — the second of the two theses in `PLAN.md`, specified in
+`03-orchestration.md` since the first commit and never enforced. Also fixes a second
+fail-open found while building it.
+
+### Added
+
+- **Capability cards are now load-bearing.** A seat's card declares its capabilities in
+  the three states from `03-orchestration.md` (`native` / `author-required` /
+  `unavailable`), the lanes it may enter, and paths forbidden to it. Cards live in
+  `.parallel-agents/capabilities/<seat>.json` and are committed, like the lane policy.
+- **`capability_gates` in `config.yaml`** maps path patterns to the capability they
+  require. This is what turns a rating into an enforceable rule — the mechanical form of
+  the instruction in `01-working-agreement.md` to stop when a change touches money, auth,
+  tenant isolation, or a migration. Defaults gate auth/payments/billing/tenant/secrets
+  paths on `security_review`, and migration paths on `database_migrations`.
+- **`validate` enforces the gates.** `native` passes; `author-required` passes only if a
+  quality command declaring `satisfies: <capability>` ran and exited 0; `unavailable` is a
+  hard stop with a non-zero exit. A seat rated unavailable for security review can no
+  longer get a green validate on auth code, even when the file is inside its lane.
+- **`parallel-agents declare <agent>`** generates the PR template's mandatory Gate
+  Declaration from recorded state — seat, harness, ratings, gates triggered, and each
+  quality command with its real exit code. Previously an honour-system form a human typed.
+- **Quality commands may declare `satisfies:`**, which is what makes `author-required`
+  operational. Plain string commands still parse, so existing configs are unaffected.
+- **`doctor` checks card health**: gates configured with no cards, an agent whose seat has
+  no card, a card scoping a lane that does not exist, a gate no card rates, and a lane no
+  seat may enter.
+- **`init` writes starter cards** for SR1/SR2/JR1/JR2. Junior seats are deliberately
+  restricted, so the gates have something to bite on immediately.
+
+### Security
+
+- **`LaneEngine.match_glob` could not match `**/x/**` patterns.** It short-circuited on
+  any pattern ending in `/**` and fell back to a prefix comparison, so a pattern that both
+  began with `**/` and ended with `/**` matched nothing at all. A lane declaring
+  `deny: ["**/secrets/**"]` silently denied nothing, and `src/secrets/prod.pem` validated
+  as in-lane. Replaced with a segment-aware translator: `**` spans whole path segments,
+  `*` and `?` never cross a separator, and regex metacharacters in patterns are literal.
+
+### Changed
+
+- **`spawn --seat` is a real lookup.** The `"SR1" if "senior" in name.lower() else "JR1"`
+  heuristic is gone. An undeclared seat, or a seat whose card excludes the requested lane,
+  is rejected before anything is provisioned.
+- `validate` output now shows a Capability Gates section listing the gates evaluated, the
+  seat's rating, and the file that triggered any block.
+
+### Testing
+
+- 108 tests (from 70), green on Python 3.10–3.13 locally and 3.9–3.13 plus macOS and
+  Windows in CI.
+- `test_capability_gates.py` (28 tests) covers all three states, the author-required
+  script contract, `forbidden_paths` precedence, lane-scope enforcement, and four
+  distinct fail-closed paths: unknown seat, missing card, unrated capability, and a
+  passing-but-untagged command not satisfying a gate.
+- `test_glob_matching.py` pins the matcher, including that `**/auth/**` must not match
+  `src/authentic/`, and that a recursive deny pattern actually denies.
+
 ## [v0.2.0] - 2026-08-30
 
 Hardening release. Two defects allowed the tool to report unsafe work as safe; both are
