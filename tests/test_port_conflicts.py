@@ -11,9 +11,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import Config
-from parallel_agents.ports import PortManager
-from parallel_agents.state import AgentState, AgentStatus, StateManager
+from lanekeeper.config import Config
+from lanekeeper.ports import PortManager
+from lanekeeper.state import AgentState, AgentStatus, StateManager
 
 
 class PortAuditTestCase(unittest.TestCase):

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.state import AgentState, AgentStatus, StateManager
+from lanekeeper.state import AgentState, AgentStatus, StateManager
 
 
 class TestStateManager(unittest.TestCase):

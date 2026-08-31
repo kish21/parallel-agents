@@ -19,9 +19,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import LaneConfig
-from parallel_agents.lanes import LaneEngine
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import LaneConfig
+from lanekeeper.lanes import LaneEngine
+from lanekeeper.worktree import WorktreeManager
 
 
 class ChangedFilesTestCase(unittest.TestCase):

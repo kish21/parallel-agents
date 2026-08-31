@@ -1,4 +1,4 @@
-"""Automated reproducibility benchmark for Parallel Agents.
+"""Automated reproducibility benchmark for Lanekeeper.
 
 Runs multiple randomized concurrent agent cycles to measure:
   1. Worktree collision rate (Goal: 0.0%)
@@ -25,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 PROJECT_SRC = Path(__file__).resolve().parent.parent / "src"
 
 def run(cmd_args: str, cwd=None):
-    cmd = f'python -m parallel_agents.cli {cmd_args}'
+    cmd = f'python -m lanekeeper.cli {cmd_args}'
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_SRC)
     res = subprocess.run(
@@ -56,7 +56,7 @@ def run_git(cmd_str: str, cwd=None):
 
 def run_benchmark(cycles: int = 10) -> dict:
     print("=" * 70)
-    print(f"📊 RUNNING PARALLEL AGENTS BENCHMARK ({cycles} CYCLES)")
+    print(f"📊 RUNNING LANEKEEPER BENCHMARK ({cycles} CYCLES)")
     print("=" * 70)
 
     stats = {
@@ -104,7 +104,7 @@ def run_benchmark(cycles: int = 10) -> dict:
                     [
                         sys.executable,
                         "-m",
-                        "parallel_agents.cli",
+                        "lanekeeper.cli",
                         "spawn",
                         "--name",
                         name,
@@ -183,7 +183,7 @@ def run_benchmark(cycles: int = 10) -> dict:
 
 def print_report(stats: dict):
     print("\n" + "=" * 70)
-    print("📈 PARALLEL AGENTS: BENCHMARK RESULTS & SYSTEM RELIABILITY METRICS")
+    print("📈 LANEKEEPER: BENCHMARK RESULTS & SYSTEM RELIABILITY METRICS")
     print("=" * 70)
     print(f"  • Total Cycles Executed:        {stats['cycles_completed']} / {stats['cycles_requested']}")
     print(f"  • Total Agents Spawned:         {stats['total_agents_spawned']}")
@@ -231,7 +231,7 @@ def print_report(stats: dict):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Parallel Agents benchmark")
+    parser = argparse.ArgumentParser(description="Run Lanekeeper benchmark")
     parser.add_argument("--cycles", type=int, default=5, help="Number of benchmark cycles")
     args = parser.parse_args()
     

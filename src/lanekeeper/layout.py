@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .config import LaneConfig
 from .lanes import LaneEngine
+from . import paths
 
 # Directory names that reliably indicate a role.
 ROLE_BY_DIR_NAME = {
@@ -46,7 +47,7 @@ ROLE_BY_EXTENSION = {
 
 # Directories that are never a lane.
 IGNORED_DIRS = {
-    ".git", ".parallel-agents", "node_modules", "venv", ".venv", "__pycache__",
+    ".git", paths.DEFAULT_HOME, "node_modules", "venv", ".venv", "__pycache__",
     "dist", "build", "target", ".idea", ".vscode", "vendor", ".mypy_cache",
     ".pytest_cache", ".ruff_cache", "coverage", ".next", ".nuxt",
 }

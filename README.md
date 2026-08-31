@@ -1,11 +1,11 @@
-# Parallel Agents ⚡
+# Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](CHANGELOG.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-v0.5.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run multiple AI coding agents safely in the same repository.**
 
-Parallel Agents gives each coding agent its own Git worktree, branch, ports, environment, and code boundaries, so agents can work at the same time without accidentally interfering with each other.
+Lanekeeper gives each coding agent its own Git worktree, branch, ports, environment, and code boundaries, so agents can work at the same time without accidentally interfering with each other.
 
 ```
                     Your Repository
@@ -30,7 +30,7 @@ Parallel Agents gives each coding agent its own Git worktree, branch, ports, env
 
 ---
 
-## Why Parallel Agents?
+## Why Lanekeeper?
 
 AI coding agents are powerful, but running several agents in the same repository creates real operational problems:
 
@@ -41,7 +41,7 @@ AI coding agents are powerful, but running several agents in the same repository
 * **Out-of-Scope Changes**: An agent can modify central configs, auth, or infrastructure outside its assigned task.
 * **Resource Leaks**: Failed agents can leave behind orphaned processes, blocked ports, or stale git state.
 
-Parallel Agents adds a mechanical coordination and safety layer around your coding agents to prevent these problems.
+Lanekeeper adds a mechanical coordination and safety layer around your coding agents to prevent these problems.
 
 ---
 
@@ -58,9 +58,9 @@ agent-001 → "Implement user authentication"
 ### 2. Worktree
 Each agent gets its own physical Git working directory.
 ```
-Agent 1 → .parallel-agents/worktrees/agent-001
-Agent 2 → .parallel-agents/worktrees/agent-002
-Agent 3 → .parallel-agents/worktrees/agent-003
+Agent 1 → .lanekeeper/worktrees/agent-001
+Agent 2 → .lanekeeper/worktrees/agent-002
+Agent 3 → .lanekeeper/worktrees/agent-003
 ```
 Agents never edit the same physical files simultaneously.
 
@@ -100,8 +100,8 @@ pip install lanekeeper
 ```
 
 The distribution is published as **`lanekeeper`**; the command it installs is
-**`lanekeeper`**, with `parallel-agents` kept as an alias so either works. (The name
-`parallel-agents` was already taken on PyPI by an unrelated project, so installing that
+**`lanekeeper`**, with `lanekeeper` kept as an alias so either works. (The name
+`lanekeeper` was already taken on PyPI by an unrelated project, so installing that
 would fetch someone else's package.)
 
 From a clone:
@@ -116,7 +116,7 @@ pip install -e .
 reports how much of the tree they cover:
 
 ```
-$ parallel-agents init
+$ lanekeeper init
 🧭 Detected 3 lanes from the repository layout: backend, frontend, platform
    Coverage: 100% of 412 tracked files fall inside a lane.
 ```
@@ -126,22 +126,35 @@ legitimate work as out-of-lane. Use `--generic` to keep the starter lanes instea
 
 From your project root:
 ```bash
-parallel-agents init
+lanekeeper init
 ```
-This creates the `.parallel-agents/` configuration and state directories.
+This creates the `.lanekeeper/` configuration and state directories.
+
+Lanekeeper keeps its own files in one directory. To put them somewhere else,
+set `LANEKEEPER_HOME` to a directory name relative to the repository root
+before running any command:
+
+```bash
+export LANEKEEPER_HOME=.agents
+```
+
+Everything lanekeeper writes moves with it — config, state, logs, capability
+cards, the default worktree location, and the rules `init` adds to
+`.gitignore`. Absolute paths and paths containing `..` are rejected, so the
+directory always stays inside the repository.
 
 ### 3. Create an Agent
 ```bash
-parallel-agents spawn \
+lanekeeper spawn \
   --name backend-1 \
   --lane backend \
   --task "Implement user authentication"
 ```
-Parallel Agents provisions the isolated worktree, branch, `.env`, and dedicated ports automatically (and optionally starts an agent execution process when `--command` is supplied).
+Lanekeeper provisions the isolated worktree, branch, `.env`, and dedicated ports automatically (and optionally starts an agent execution process when `--command` is supplied).
 
 ### 4. Create Another Agent
 ```bash
-parallel-agents spawn \
+lanekeeper spawn \
   --name frontend-1 \
   --lane frontend \
   --task "Build the login interface"
@@ -150,7 +163,7 @@ Now both agents can work simultaneously without collision.
 
 ### 5. Check Agents
 ```bash
-$ parallel-agents status
+$ lanekeeper status
 
 📋 PARALLEL AGENTS — MY-PROJECT
 
@@ -162,7 +175,7 @@ agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Buil
 
 ### 6. Validate an Agent's Work
 ```bash
-$ parallel-agents validate agent-001
+$ lanekeeper validate agent-001
 
 🛡️ VALIDATION REPORT: backend-1 (agent-001)
 Lane: backend
@@ -176,17 +189,17 @@ Lane: backend
 
 ### 7. Inspect Changed Files
 ```bash
-parallel-agents diff agent-001
+lanekeeper diff agent-001
 ```
 
 ### 8. Stop an Agent
 ```bash
-parallel-agents stop agent-001
+lanekeeper stop agent-001
 ```
 
 ### 9. Clean Up Safely
 ```bash
-parallel-agents cleanup agent-001
+lanekeeper cleanup agent-001
 ```
 
 ---
@@ -266,8 +279,8 @@ lookup is strict:
 There is deliberately no permissive fallback. An unrecognised lane is a configuration
 error, never a lane that happens to allow every path.
 
-> **Commit `.parallel-agents/config.yaml`.** It is the policy every agent is validated
-> against — the team's shared contract. `parallel-agents init` adds ignore rules that keep
+> **Commit `.lanekeeper/config.yaml`.** It is the policy every agent is validated
+> against — the team's shared contract. `lanekeeper init` adds ignore rules that keep
 > runtime state and worktrees out of git while leaving the config tracked. Without those
 > rules an agent running `git add -A` would sweep every other agent's worktree into its own
 > commit.
@@ -322,7 +335,7 @@ green-but-untagged quality command are **all denials**. Absence is never permiss
 
 ### Generating the gate declaration
 
-`parallel-agents declare <agent>` produces the PR template's mandatory Gate Declaration
+`lanekeeper declare <agent>` produces the PR template's mandatory Gate Declaration
 from recorded state — the seat, its ratings, the gates triggered, and each quality command
 with its real exit code — rather than asking an author to type it from memory.
 
@@ -360,22 +373,22 @@ CREATED ──► STARTING ──► RUNNING ──┬──► COMPLETED ──
 
 Useful commands:
 ```bash
-parallel-agents status
-parallel-agents logs backend-1
-parallel-agents stop backend-1
-parallel-agents restart backend-1
-parallel-agents repair backend-1
-parallel-agents cleanup backend-1
+lanekeeper status
+lanekeeper logs backend-1
+lanekeeper stop backend-1
+lanekeeper restart backend-1
+lanekeeper repair backend-1
+lanekeeper cleanup backend-1
 ```
 
 ---
 
 ## Mechanical Validation
 
-Never rely on an AI agent's word that its work is complete. Parallel Agents independently validates:
+Never rely on an AI agent's word that its work is complete. Lanekeeper independently validates:
 
 ```bash
-$ parallel-agents validate backend-1
+$ lanekeeper validate backend-1
 
 Validation: backend-1
 
@@ -411,7 +424,7 @@ Result: FAIL (Exit code 2)
 If an agent process crashes or an orphaned port is left behind:
 
 ```bash
-$ parallel-agents doctor
+$ lanekeeper doctor
 
 🩺 PARALLEL AGENTS DOCTOR
 
@@ -423,7 +436,7 @@ $ parallel-agents doctor
       ↳ Port 8001 still reserved by stopped agent 'agent-001'.
   ✓ Agent processes: All active agent process states are consistent.
 
-⚠️ 1 problem(s) detected. Run 'parallel-agents repair' to fix.
+⚠️ 1 problem(s) detected. Run 'lanekeeper repair' to fix.
 ```
 
 `doctor` reports three classes of problem:
@@ -436,7 +449,7 @@ $ parallel-agents doctor
 
 Run repair to automatically clean up orphaned resources:
 ```bash
-parallel-agents repair
+lanekeeper repair
 ```
 
 ---
@@ -462,10 +475,10 @@ agent-003 → app_agent_003
 
 ## Agent Providers & Adapters
 
-Parallel Agents is provider-independent. It uses a pluggable `AgentAdapter` abstraction:
+Lanekeeper is provider-independent. It uses a pluggable `AgentAdapter` abstraction:
 
 ```
-              Parallel Agents
+              Lanekeeper
                     │
               Agent Adapter
                     │
@@ -485,19 +498,19 @@ swapping vendors edits one field and changes nothing else.
 
 | Command | Purpose |
 | :--- | :--- |
-| **`parallel-agents init`** | Initializes repository and creates configuration. |
-| **`parallel-agents doctor`** | Diagnoses repository, worktree, and port health. |
-| **`parallel-agents spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
-| **`parallel-agents status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
-| **`parallel-agents validate`** | Mechanically validates lane compliance and runs test suites. |
-| **`parallel-agents diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
-| **`parallel-agents inspect`** | Shows detailed agent metadata and environment variables. |
-| **`parallel-agents logs`** | Tails structured execution logs for an agent session. |
-| **`parallel-agents stop`** | Stops an active agent process. |
-| **`parallel-agents restart`** | Restarts an agent in its worktree. |
-| **`parallel-agents repair`** | Repairs stale states and releases orphaned ports. |
-| **`parallel-agents declare`** | Generates the PR gate declaration from recorded state. |
-| **`parallel-agents cleanup`** | Safely removes worktrees and releases port allocations. |
+| **`lanekeeper init`** | Initializes repository and creates configuration. |
+| **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
+| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
+| **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
+| **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
+| **`lanekeeper diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
+| **`lanekeeper inspect`** | Shows detailed agent metadata and environment variables. |
+| **`lanekeeper logs`** | Tails structured execution logs for an agent session. |
+| **`lanekeeper stop`** | Stops an active agent process. |
+| **`lanekeeper restart`** | Restarts an agent in its worktree. |
+| **`lanekeeper repair`** | Repairs stale states and releases orphaned ports. |
+| **`lanekeeper declare`** | Generates the PR gate declaration from recorded state. |
+| **`lanekeeper cleanup`** | Safely removes worktrees and releases port allocations. |
 
 ---
 
@@ -511,7 +524,7 @@ swapping vendors edits one field and changes nothing else.
 
 ---
 
-## 🚫 What Parallel Agents Is Not
+## 🚫 What Lanekeeper Is Not
 
 * ❌ Not an autonomous AI software company.
 * ❌ Not an AI project manager.
@@ -524,7 +537,7 @@ It is a **lightweight coordination and safety layer** for parallel AI coding age
 
 ## 🧪 Automated Testing & Reliability Benchmarks
 
-Parallel Agents includes a **tracked 36-test unit, integration, concurrency stress, and failure recovery suite** and an automated reproducibility benchmark runner.
+Lanekeeper includes a **tracked 36-test unit, integration, concurrency stress, and failure recovery suite** and an automated reproducibility benchmark runner.
 
 ### 1. Run the Full Test Suite
 ```bash
@@ -584,24 +597,24 @@ run.
 
 | Document | Description |
 | :--- | :--- |
-| **[🎬 End-to-End Walkthrough](EXAMPLES.md)** | Step-by-step lifecycle of Ticket #102 from assignment to merge. |
-| **[01. Working Agreement](01-working-agreement.md)** | Definition-of-Done, path boundary contracts, and merge discipline. |
-| **[02. Conflict Management](02-conflict-management.md)** | Worktree deep-dive, port tables, and Disaster Recovery Runbook. |
-| **[03. Orchestration](03-orchestration.md)** | Capability cards, scaling 2→4→6 seats, and ROI metrics. |
-| **[04. Agent Setup](04-agent-setup.md)** | Prompts for Senior/Junior agents and token cost hygiene. |
-| **[05. GitHub Mechanics](05-github-mechanics.md)** | Board custom fields, disjoint milestones, and single-account routing. |
-| **[06. Free-Tier Operations](06-free-tier-ops.md)** | CI minute optimization, public vs private repo trade-offs, and verified mirrors. |
+| **[🎬 End-to-End Walkthrough](https://github.com/kish21/parallel-agents/blob/main/EXAMPLES.md)** | Step-by-step lifecycle of Ticket #102 from assignment to merge. |
+| **[01. Working Agreement](https://github.com/kish21/parallel-agents/blob/main/01-working-agreement.md)** | Definition-of-Done, path boundary contracts, and merge discipline. |
+| **[02. Conflict Management](https://github.com/kish21/parallel-agents/blob/main/02-conflict-management.md)** | Worktree deep-dive, port tables, and Disaster Recovery Runbook. |
+| **[03. Orchestration](https://github.com/kish21/parallel-agents/blob/main/03-orchestration.md)** | Capability cards, scaling 2→4→6 seats, and ROI metrics. |
+| **[04. Agent Setup](https://github.com/kish21/parallel-agents/blob/main/04-agent-setup.md)** | Prompts for Senior/Junior agents and token cost hygiene. |
+| **[05. GitHub Mechanics](https://github.com/kish21/parallel-agents/blob/main/05-github-mechanics.md)** | Board custom fields, disjoint milestones, and single-account routing. |
+| **[06. Free-Tier Operations](https://github.com/kish21/parallel-agents/blob/main/06-free-tier-ops.md)** | CI minute optimization, public vs private repo trade-offs, and verified mirrors. |
 
 ---
 
 ## 🤝 Community & Contributing
 
 Contributions are welcome! See our community guidelines:
-* **[Contributing Guide](CONTRIBUTING.md)**
-* **[Security Policy](SECURITY.md)**
-* **[Code of Conduct](CODE_OF_CONDUCT.md)**
+* **[Contributing Guide](https://github.com/kish21/parallel-agents/blob/main/CONTRIBUTING.md)**
+* **[Security Policy](https://github.com/kish21/parallel-agents/blob/main/SECURITY.md)**
+* **[Code of Conduct](https://github.com/kish21/parallel-agents/blob/main/CODE_OF_CONDUCT.md)**
 
 ---
 
 ## License
-[MIT](LICENSE)
+[MIT](https://github.com/kish21/parallel-agents/blob/main/LICENSE)

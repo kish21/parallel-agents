@@ -30,13 +30,13 @@ def cli_env():
 
 
 def run_cli(args, cwd):
-    """Runs `parallel-agents <args>` in `cwd`.
+    """Runs `lanekeeper <args>` in `cwd`.
 
     Returns the CompletedProcess with `stdout` and `stderr` guaranteed to be strings,
     never None, so callers can safely build assertion messages from them.
     """
     proc = subprocess.run(
-        [sys.executable, "-m", "parallel_agents.cli", *args],
+        [sys.executable, "-m", "lanekeeper.cli", *args],
         cwd=str(cwd),
         capture_output=True,
         text=True,

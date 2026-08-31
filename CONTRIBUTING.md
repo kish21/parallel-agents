@@ -1,6 +1,6 @@
-# Contributing to Parallel Agents 🤝
+# Contributing to Lanekeeper 🤝
 
-Thank you for your interest in contributing to **Parallel Agents**! We welcome contributions from both human developers and teams operating AI-assisted coding harnesses.
+Thank you for your interest in contributing to **Lanekeeper**! We welcome contributions from both human developers and teams operating AI-assisted coding harnesses.
 
 This project is a practical, vendor-neutral framework designed to make parallel multi-agent software engineering reliable, scalable, and conflict-free.
 

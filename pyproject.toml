@@ -20,10 +20,7 @@ Repository = "https://github.com/kish21/parallel-agents"
 Changelog = "https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md"
 
 [project.scripts]
-# `lanekeeper` is the primary command. `parallel-agents` is kept as an alias so existing
-# scripts, docs and muscle memory continue to work; both dispatch to the same entry point.
-lanekeeper = "parallel_agents.cli:main"
-parallel-agents = "parallel_agents.cli:main"
+lanekeeper = "lanekeeper.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

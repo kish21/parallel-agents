@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.cli import (
+from lanekeeper.cli import (
     cmd_cleanup,
     cmd_doctor,
     cmd_init,
@@ -13,8 +13,8 @@ from parallel_agents.cli import (
     cmd_status,
     cmd_validate,
 )
-from parallel_agents.config import load_config
-from parallel_agents.state import StateManager
+from lanekeeper.config import load_config
+from lanekeeper.state import StateManager
 
 
 class TestE2E3Agents(unittest.TestCase):

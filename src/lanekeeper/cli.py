@@ -1,4 +1,4 @@
-"""Command-Line Interface for parallel-agents."""
+"""Command-Line Interface for lanekeeper."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from .capabilities import (
 )
 from .config import Config, UnknownLaneError, load_config, save_config
 from .doctor import Doctor
+from . import paths
 from .layout import detect_layout, measure_coverage
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
@@ -43,7 +44,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 1
 
     project_name = args.name or root.name
-    config_file = root / ".parallel-agents" / "config.yaml"
+    config_file = paths.config_path(root)
 
     if config_file.exists() and not args.force:
         print(f"ℹ️ Configuration already exists at {config_file}. Use --force to re-initialize.")
@@ -72,7 +73,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     # starter cards so the feature is usable and visible from the first spawn.
     written_cards = [save_card(card, root) for card in default_cards(sorted(cfg.lanes))]
 
-    print(f"✨ Initialized parallel-agents for '{project_name}'")
+    print(f"✨ Initialized lanekeeper for '{project_name}'")
     print(f"📁 Configuration written to {config_file}")
     print(f"📁 Worktrees directory: {cfg.worktree_dir}")
 
@@ -97,9 +98,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"🎫 Capability cards written for {len(written_cards)} seats: "
           + ", ".join(c.stem for c in written_cards))
     if gitignore_updated:
-        print("📝 Added parallel-agents rules to .gitignore (runtime state ignored, config tracked)")
-    print("\n⚠️  Commit .parallel-agents/config.yaml — it is the lane policy every agent is validated against.")
-    print("\nNext: Run 'parallel-agents doctor' or spawn an agent with 'parallel-agents spawn --name <name> --lane <lane> --task <task>'")
+        print("📝 Added lanekeeper rules to .gitignore (runtime state ignored, config tracked)")
+    print(f"\n⚠️  Commit {paths.display_config_path(root)} — it is the lane policy every agent is validated against.")
+    print("\nNext: Run 'lanekeeper doctor' or spawn an agent with 'lanekeeper spawn --name <name> --lane <lane> --task <task>'")
     return 0
 
 
@@ -107,7 +108,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     doctor = Doctor()
     report = doctor.diagnose()
 
-    print("\n🩺 PARALLEL AGENTS DOCTOR\n")
+    print("\n🩺 LANEKEEPER DOCTOR\n")
     for check in report.checks:
         icon = "✓" if check.passed else "✗"
         print(f"  {icon} {check.name}: {check.message}")
@@ -120,14 +121,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("✅ Environment is clean and ready for parallel execution.")
         return 0
     else:
-        print(f"⚠️ {report.problem_count} problem(s) detected. Run 'parallel-agents repair' to fix.")
+        print(f"⚠️ {report.problem_count} problem(s) detected. Run 'lanekeeper repair' to fix.")
         return 1
 
 
 def cmd_repair(args: argparse.Namespace) -> int:
     doctor = Doctor()
     actions = doctor.repair(args.agent)
-    print("\n🔧 PARALLEL AGENTS REPAIR\n")
+    print("\n🔧 LANEKEEPER REPAIR\n")
     if not actions:
         print("  No repair actions required.")
     else:
@@ -142,7 +143,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         config = load_config()
         state_mgr = StateManager()
     except Exception as e:
-        print(f"❌ Error loading parallel-agents state: {e}", file=sys.stderr)
+        print(f"❌ Error loading lanekeeper state: {e}", file=sys.stderr)
         return 1
 
     agents = state_mgr.list_agents()
@@ -156,9 +157,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(json.dumps(output_data, indent=2))
         return 0
 
-    print(f"\n📋 PARALLEL AGENTS — {config.project_name.upper()}\n")
+    print(f"\n📋 LANEKEEPER — {config.project_name.upper()}\n")
     if not agents:
-        print("  No active agents found. Run 'parallel-agents spawn' to start one.\n")
+        print("  No active agents found. Run 'lanekeeper spawn' to start one.\n")
         return 0
 
     header = f"{'Agent ID':<12} {'Name':<14} {'Seat':<6} {'Lane':<12} {'Status':<10} {'Ports':<16} {'Task'}"
@@ -174,15 +175,24 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-GITIGNORE_BEGIN = "# --- parallel-agents (managed) ---"
-GITIGNORE_END = "# --- end parallel-agents ---"
-GITIGNORE_BLOCK = f"""{GITIGNORE_BEGIN}
+GITIGNORE_BEGIN = "# --- lanekeeper (managed) ---"
+GITIGNORE_END = "# --- end lanekeeper ---"
+
+
+def gitignore_block(root: Optional[Path] = None) -> str:
+    """The managed ignore block, built from the configured directory name.
+
+    Built on demand rather than as a module constant so that an overridden
+    directory name is reflected in what `init` writes.
+    """
+    ignore, keep = paths.gitignore_lines(root)
+    return f"""{GITIGNORE_BEGIN}
 # Runtime state, logs and agent worktrees are machine-local and must never be committed.
 # Without these rules an agent running `git add -A` would sweep every other agent's
 # worktree into its own commit.
-/.parallel-agents/*
-# The lane policy is the team's shared contract — keep it tracked.
-!/.parallel-agents/config.yaml
+{ignore}
+# The lane policy is the team's shared contract - keep it tracked.
+{keep}
 {GITIGNORE_END}
 """
 
@@ -198,7 +208,7 @@ def ensure_gitignore(root: Path) -> bool:
         return False
     prefix = "" if not existing or existing.endswith("\n") else "\n"
     with open(gitignore, "a", encoding="utf-8") as f:
-        f.write(f"{prefix}\n{GITIGNORE_BLOCK}")
+        f.write(f"{prefix}\n{gitignore_block(root)}")
     return True
 
 
@@ -226,7 +236,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     if not config.has_lane(args.lane):
         known = ", ".join(sorted(config.lanes)) or "(none declared)"
         print(f"❌ Unknown lane '{args.lane}'. Declared lanes: {known}.", file=sys.stderr)
-        print("   Add the lane to .parallel-agents/config.yaml, or spawn into an existing one.", file=sys.stderr)
+        print(f"   Add the lane to {paths.display_config_path()}, or spawn into an existing one.", file=sys.stderr)
         return 1
 
     # A seat must have a capability card whenever gates are configured, and its card must
@@ -237,7 +247,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     if config.capability_gates:
         if registry.is_empty:
             print("❌ Capability gates are configured but no capability cards were found.", file=sys.stderr)
-            print("   Expected cards in .parallel-agents/capabilities/. Run 'parallel-agents init --force'", file=sys.stderr)
+            print(f"   Expected cards in {paths.display_capabilities_dir()}. Run 'lanekeeper init --force'", file=sys.stderr)
             print("   to write the starter cards, or remove capability_gates from config.yaml.", file=sys.stderr)
             return 1
         try:
@@ -315,8 +325,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"  • Lane:     {lane}")
     print(f"  • Ports:    {ports_display}")
     print(f"  • Seat:     {seat}")
-    print(f"\nTo inspect:  parallel-agents inspect {agent_id}")
-    print(f"To validate: parallel-agents validate {agent_id}")
+    print(f"\nTo inspect:  lanekeeper inspect {agent_id}")
+    print(f"To validate: lanekeeper validate {agent_id}")
     return 0
 
 
@@ -422,7 +432,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
     for f in changed_files:
         norm_f = LaneEngine.normalize_path(f)
-        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(p) for p in (".parallel-agents/", ".git/")):
+        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(prefix) for prefix in paths.ignored_prefixes()):
             continue
 
         violation = None
@@ -621,13 +631,13 @@ def cmd_declare(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="parallel-agents",
-        description="Parallel Agents — Mechanical Safety & Coordination Tool for AI Coding Agents",
+        prog="lanekeeper",
+        description="Lanekeeper — Mechanical Safety & Coordination Tool for AI Coding Agents",
     )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # init
-    p_init = subparsers.add_parser("init", help="Initialize parallel-agents in current Git repository")
+    p_init = subparsers.add_parser("init", help="Initialize lanekeeper in current Git repository")
     p_init.add_argument("--name", help="Project name")
     p_init.add_argument("--force", action="store_true", help="Overwrite existing configuration")
     p_init.add_argument("--generic", action="store_true",

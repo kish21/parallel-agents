@@ -1,6 +1,6 @@
 """Tests that `init` protects the repository from its own runtime state.
 
-Agent worktrees live at .parallel-agents/worktrees/ *inside* the repository. Without
+Agent worktrees live at .lanekeeper/worktrees/ *inside* the repository. Without
 ignore rules, an agent running `git add -A` sweeps every other agent's worktree and the
 shared state files into its own commit — the exact cross-agent contamination this tool
 exists to prevent.
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.cli import GITIGNORE_BEGIN, ensure_gitignore
+from lanekeeper.cli import GITIGNORE_BEGIN, ensure_gitignore
 
 
 def git(args, cwd):
@@ -75,13 +75,13 @@ class TestInitProtectsTheRepo(unittest.TestCase):
 
         # The lane policy is the team contract: it must remain committable.
         self.assertNotEqual(
-            git(["check-ignore", "-q", ".parallel-agents/config.yaml"], self.tmp).returncode, 0,
+            git(["check-ignore", "-q", ".lanekeeper/config.yaml"], self.tmp).returncode, 0,
             "config.yaml must NOT be ignored — it is the shared lane policy")
 
-        # Everything else under .parallel-agents is machine-local.
-        for ignored in [".parallel-agents/state/agents.json",
-                        ".parallel-agents/state/ports.json",
-                        ".parallel-agents/worktrees/agent-001/README.md"]:
+        # Everything else under .lanekeeper is machine-local.
+        for ignored in [".lanekeeper/state/agents.json",
+                        ".lanekeeper/state/ports.json",
+                        ".lanekeeper/worktrees/agent-001/README.md"]:
             with self.subTest(path=ignored):
                 self.assertEqual(
                     git(["check-ignore", "-q", ignored], self.tmp).returncode, 0,

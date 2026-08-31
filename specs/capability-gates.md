@@ -3,7 +3,7 @@
 > **Status**: **Implemented** in v0.3.0 (phases 1–4). This document is now the design
 > record; behaviour is pinned by `tests/test_capability_gates.py`.
 > **Closes**: the gap between `03-orchestration.md` (capability cards, designed) and
-> `src/parallel_agents/` (lanes only, implemented).
+> `src/lanekeeper/` (lanes only, implemented).
 
 ---
 
@@ -60,7 +60,7 @@ when its benchmark falls below 70%).
 ## 3. Data model
 
 Reuse the card from `03-orchestration.md` verbatim — it is already well specified. Cards
-live in `.parallel-agents/capabilities/<seat>.json` and are **committed**, like the lane
+live in `.lanekeeper/capabilities/<seat>.json` and are **committed**, like the lane
 policy, because they are a team contract.
 
 ```json
@@ -85,7 +85,7 @@ the capability they require**. This is what turns a rating into an enforceable r
 is the piece `03-orchestration.md` leaves implicit.
 
 ```yaml
-# .parallel-agents/config.yaml
+# .lanekeeper/config.yaml
 capability_gates:
   security_review:
     paths: ["**/auth/**", "**/payments/**", "**/billing/**", "**/tenant*/**"]
@@ -135,7 +135,7 @@ warning. A non-zero exit.
 
 ### 4.3 `declare` — generate the gate declaration
 
-New command: `parallel-agents declare <agent> [--markdown]`
+New command: `lanekeeper declare <agent> [--markdown]`
 
 Emits the PR template's mandatory Gate Declaration from recorded state rather than from an
 author's memory: seat, harness, lane, capability ratings that applied, each quality command
@@ -190,7 +190,7 @@ them by changing the code and the tests that pin it.
    only where `capability_gates` are configured; if none are, there is nothing to enforce.
    Once gates *are* configured, a seat without a card fails closed. `init` writes both, so
    a new repository is gated from the first spawn and the two can never drift apart.
-2. **Where cards live** — `.parallel-agents/capabilities/<seat>.json`, one file per seat,
+2. **Where cards live** — `.lanekeeper/capabilities/<seat>.json`, one file per seat,
    so loosening a single seat is a visible one-file diff in review.
 3. **Whether this belongs here** — implemented here, because the README already implied
    the CLI enforced it. Nothing in the implementation is repo-specific; if the phase-skills
@@ -208,7 +208,7 @@ them by changing the code and the tests that pin it.
    `init` write default cards for SR1/SR2/JR1/JR2. I lean (c) — it keeps everything
    fail-closed and makes the feature visible on day one.
 
-2. **Where cards live.** This spec says `.parallel-agents/capabilities/<seat>.json`.
+2. **Where cards live.** This spec says `.lanekeeper/capabilities/<seat>.json`.
    `03-orchestration.md` suggests repository root as `capabilities.json` or
    `.lane.capabilities`. One file per seat is easier to review in a PR diff; a single
    file is easier to read whole. Your call.

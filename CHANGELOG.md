@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the `parallel-agents` framework and scaffolding will be documented in this file.
+All notable changes to the `lanekeeper` framework and scaffolding will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -11,12 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The distribution is now published as `lanekeeper`.** `parallel-agents` was already
-  registered on PyPI by an unrelated project, so `pip install parallel-agents` fetched
+- **The distribution is now published as `lanekeeper`.** `lanekeeper` was already
+  registered on PyPI by an unrelated project, so `pip install lanekeeper` fetched
   someone else's package and this one could not be installed by name at all. The
-  repository, the import package (`parallel_agents`), and the existing command are all
+  repository, the import package (`lanekeeper`), and the existing command are all
   unchanged.
-- **`lanekeeper` is the primary command**, with `parallel-agents` retained as an alias
+- **`lanekeeper` is the primary command**, with `lanekeeper` retained as an alias
   pointing at the same entry point, so existing scripts, documentation and habits keep
   working.
 - Added `[project.urls]` so the PyPI page links back to the repository and changelog.
@@ -82,7 +82,7 @@ fail-open found while building it.
 - **Capability cards are now load-bearing.** A seat's card declares its capabilities in
   the three states from `03-orchestration.md` (`native` / `author-required` /
   `unavailable`), the lanes it may enter, and paths forbidden to it. Cards live in
-  `.parallel-agents/capabilities/<seat>.json` and are committed, like the lane policy.
+  `.lanekeeper/capabilities/<seat>.json` and are committed, like the lane policy.
 - **`capability_gates` in `config.yaml`** maps path patterns to the capability they
   require. This is what turns a rating into an enforceable rule — the mechanical form of
   the instruction in `01-working-agreement.md` to stop when a change touches money, auth,
@@ -92,7 +92,7 @@ fail-open found while building it.
   quality command declaring `satisfies: <capability>` ran and exited 0; `unavailable` is a
   hard stop with a non-zero exit. A seat rated unavailable for security review can no
   longer get a green validate on auth code, even when the file is inside its lane.
-- **`parallel-agents declare <agent>`** generates the PR template's mandatory Gate
+- **`lanekeeper declare <agent>`** generates the PR template's mandatory Gate
   Declaration from recorded state — seat, harness, ratings, gates triggered, and each
   quality command with its real exit code. Previously an honour-system form a human typed.
 - **Quality commands may declare `satisfies:`**, which is what makes `author-required`
@@ -211,8 +211,8 @@ fixed, and both are now pinned by regression tests that fail against the old beh
   - `05-github-mechanics.md`: Board single-select fields (`Lane`, `Seat`, `Owner`), disjoint milestones, sub-issues, and single-account routing.
   - `06-free-tier-ops.md`: Public vs. private repository matrix, verified mirror sync scripts, divergence checkers, and CI minute optimizations.
 - **Scaffolding & Tooling**:
-  - **`parallel-agents` Python CLI (`src/parallel_agents/`)**: Turnkey tool implementing `init`, `doctor`, `spawn`, `status`, `diff`, `validate`, `inspect`, `logs`, `stop`, `restart`, `repair`, and `cleanup`.
-  - **Automated Worktree & Branch Manager**: Automatically provisions worktrees (`.parallel-agents/worktrees/`) on deterministic branches (`parallel/<agent-id>/<task>`).
+  - **`lanekeeper` Python CLI (`src/lanekeeper/`)**: Turnkey tool implementing `init`, `doctor`, `spawn`, `status`, `diff`, `validate`, `inspect`, `logs`, `stop`, `restart`, `repair`, and `cleanup`.
+  - **Automated Worktree & Branch Manager**: Automatically provisions worktrees (`.lanekeeper/worktrees/`) on deterministic branches (`parallel/<agent-id>/<task>`).
   - **Mechanical Lane Path Engine**: Glob-based `allow`/`deny` validator that fails with non-zero exit codes if an agent touches out-of-lane files.
   - **Collision-Free Port Allocator**: Provisions non-conflicting port pairs and injects them into isolated `.env` and `.lane` files.
   - **Diagnostics & Recovery**: Self-repair and health diagnostic suite (`doctor` and `repair`).

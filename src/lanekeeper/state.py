@@ -51,18 +51,18 @@ class AgentState:
 
 
 from .lock import StateLock
+from . import paths
 
-STATE_DIR = Path(".parallel-agents/state")
-AGENTS_FILE = STATE_DIR / "agents.json"
-PORTS_FILE = STATE_DIR / "ports.json"
+AGENTS_FILENAME = "agents.json"
+PORTS_FILENAME = "ports.json"
 
 
 class StateManager:
     def __init__(self, root_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path.cwd()
-        self.state_dir = self.root_dir / STATE_DIR
-        self.agents_file = self.root_dir / AGENTS_FILE
-        self.ports_file = self.root_dir / PORTS_FILE
+        self.state_dir = paths.state_dir(self.root_dir)
+        self.agents_file = self.state_dir / AGENTS_FILENAME
+        self.ports_file = self.state_dir / PORTS_FILENAME
         self._ensure_storage()
 
     def lock(self) -> StateLock:

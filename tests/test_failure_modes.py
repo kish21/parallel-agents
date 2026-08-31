@@ -7,12 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from parallel_agents.cli import cmd_cleanup, cmd_init, cmd_repair, cmd_spawn
-from parallel_agents.config import Config, PortRange, generate_default_config, save_config
-from parallel_agents.doctor import Doctor
-from parallel_agents.ports import PortError, PortManager
-from parallel_agents.state import AgentState, AgentStatus, StateManager
-from parallel_agents.worktree import GitError, WorktreeManager
+from lanekeeper.cli import cmd_cleanup, cmd_init, cmd_repair, cmd_spawn
+from lanekeeper.config import Config, PortRange, generate_default_config, save_config
+from lanekeeper.doctor import Doctor
+from lanekeeper.ports import PortError, PortManager
+from lanekeeper.state import AgentState, AgentStatus, StateManager
+from lanekeeper.worktree import GitError, WorktreeManager
 
 
 class TestFailureModes(unittest.TestCase):
@@ -93,7 +93,7 @@ class TestFailureModes(unittest.TestCase):
             lane="backend",
             task="Dead task",
             branch="parallel/dead",
-            worktree_path=str(self.root / ".parallel-agents" / "worktrees" / "agent-dead"),
+            worktree_path=str(self.root / ".lanekeeper" / "worktrees" / "agent-dead"),
             status=AgentStatus.RUNNING.value,
             pid=9999999, # Non-existent PID
             ports={"backend": 8001},
