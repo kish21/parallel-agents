@@ -94,6 +94,18 @@ This prevents agents from talking to the wrong development server.
 ## 🚀 Quick Start
 
 ### 1. Install
+
+```bash
+pip install lanekeeper
+```
+
+The distribution is published as **`lanekeeper`**; the command it installs is
+**`lanekeeper`**, with `parallel-agents` kept as an alias so either works. (The name
+`parallel-agents` was already taken on PyPI by an unrelated project, so installing that
+would fetch someone else's package.)
+
+From a clone:
+
 ```bash
 pip install -e .
 ```
