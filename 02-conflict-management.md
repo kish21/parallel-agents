@@ -166,7 +166,7 @@ Never let an agent calculate a sequence number. Always key migration files and g
 supabase/migrations/0043_add_billing.sql
 
 # ✅ GOOD: Issue-Bound Timestamp/ID
-supabase/migrations/20260830120000_issue_808_add_billing.sql
+supabase/migrations/<UTC-timestamp>_issue_<N>_add_billing.sql
 ```
 
 ---

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [v0.5.0] - 2026-08-31
+## [v0.5.0]
 
 ### Changed
 
@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   working.
 - Added `[project.urls]` so the PyPI page links back to the repository and changelog.
 
-## [v0.4.0] - 2026-08-31
+## [v0.4.0]
 
 Usability release, from walking the tool as a first-time user rather than reviewing the
 code. Two of the three problems that walkthrough found were defects, not preferences.
@@ -71,7 +71,7 @@ code. Two of the three problems that walkthrough found were defects, not prefere
   transparency, mutual exclusivity, build-output exclusion, and that a legitimate edit
   validates cleanly end to end.
 
-## [v0.3.0] - 2026-08-31
+## [v0.3.0]
 
 Implements capability gates — the second of the two theses in `PLAN.md`, specified in
 `03-orchestration.md` since the first commit and never enforced. Also fixes a second
@@ -131,7 +131,7 @@ fail-open found while building it.
 - `test_glob_matching.py` pins the matcher, including that `**/auth/**` must not match
   `src/authentic/`, and that a recursive deny pattern actually denies.
 
-## [v0.2.0] - 2026-08-30
+## [v0.2.0]
 
 Hardening release. Two defects allowed the tool to report unsafe work as safe; both are
 fixed, and both are now pinned by regression tests that fail against the old behaviour.
@@ -200,7 +200,7 @@ fixed, and both are now pinned by regression tests that fail against the old beh
   `test_init_gitignore.py`. The injection tests round-trip hostile strings through a real
   `/bin/sh`; the rollback test is verified to fail against the previous implementation.
 
-## [v0.1.0] - 2026-08-30 (Initial v0 Release)
+## [v0.1.0] — Initial v0 Release
 
 ### Added
 - **Core Architecture & Guide (Chapters 01–06)**:

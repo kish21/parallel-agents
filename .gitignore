@@ -23,3 +23,7 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Python virtual environments
+.venv/
+venv/
