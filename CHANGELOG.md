@@ -2,6 +2,9 @@
 
 All notable changes to the `lanekeeper` framework and scaffolding will be documented in this file.
 
+Entries before v0.5.0 describe a project that was then called `parallel-agents`; they
+use the current names for the things they describe.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -9,17 +12,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.5.0]
 
+The project is now called **lanekeeper**. Nothing had been published under the previous
+name, so this release makes the change everywhere at once rather than carrying an alias.
+
 ### Changed
 
-- **The distribution is now published as `lanekeeper`.** `lanekeeper` was already
-  registered on PyPI by an unrelated project, so `pip install lanekeeper` fetched
-  someone else's package and this one could not be installed by name at all. The
-  repository, the import package (`lanekeeper`), and the existing command are all
-  unchanged.
-- **`lanekeeper` is the primary command**, with `lanekeeper` retained as an alias
-  pointing at the same entry point, so existing scripts, documentation and habits keep
-  working.
-- Added `[project.urls]` so the PyPI page links back to the repository and changelog.
+- **Renamed to `lanekeeper`.** The previous distribution name, `parallel-agents`, is
+  registered on PyPI by an unrelated project, so `pip install parallel-agents` fetched
+  someone else's package and this one could not be installed by name at all.
+- **The rename is complete rather than cosmetic.** The import package is now
+  `lanekeeper` (was `parallel_agents`), and the directory the tool keeps its files in is
+  now `.lanekeeper/` (was `.parallel-agents/`).
+- **`lanekeeper` is the only command.** A `parallel-agents` alias was briefly kept for
+  compatibility and has been removed: nothing was ever published under that name, so no
+  installation existed for it to protect.
+- The GitHub repository keeps its name, and the guide's prose about running agents *in
+  parallel* is unchanged — that is the subject matter, not the product name.
+
+### Added
+
+- **`LANEKEEPER_HOME`** sets the directory lanekeeper keeps its files in, relative to the
+  repository root. Config, state, logs, capability cards, the default worktree location
+  and the rules `init` writes into `.gitignore` all follow it. An absolute path, or one
+  containing `..`, is refused rather than allowed to write outside the repository.
+- `[project.urls]`, so the PyPI page links back to the repository and changelog.
+
+### Fixed
+
+- `audit_ports` annotated a return type of `Dict[str, Any]` without importing `Any`.
+  Deferred annotation evaluation kept it from raising at runtime, but
+  `typing.get_type_hints()` on that method failed with a `NameError`.
+- The README's sample terminal output showed banners the commands no longer print, and
+  its version badge and file links were stale.
+
+### Internal
+
+- The directory name was previously spelled out in eight source files, including
+  user-facing messages and the generated `.gitignore` block. It is now derived in one
+  place, `lanekeeper.paths`. A stale name in the ignore block would have let one agent's
+  worktree reach another's commit, which is the failure that block exists to prevent.
 
 ## [v0.4.0]
 
