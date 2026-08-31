@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.lock import StateLock
-from parallel_agents.state import AgentState, AgentStatus, StateManager
+from lanekeeper.lock import StateLock
+from lanekeeper.state import AgentState, AgentStatus, StateManager
 
 
 class TestStateLockIntegration(unittest.TestCase):

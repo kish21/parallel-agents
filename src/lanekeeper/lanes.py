@@ -96,7 +96,7 @@ class LaneEngine:
         violations: List[LaneViolation] = []
 
         # Built-in internal files to ignore
-        ignored_prefixes = (".parallel-agents/", ".git/")
+        ignored_prefixes = (".lanekeeper/", ".git/")
         ignored_exact = (".env", ".lane", ".gitignore")
 
         for f in files:

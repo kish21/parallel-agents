@@ -1,4 +1,4 @@
-"""Command-Line Interface for parallel-agents."""
+"""Command-Line Interface for lanekeeper."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 1
 
     project_name = args.name or root.name
-    config_file = root / ".parallel-agents" / "config.yaml"
+    config_file = root / ".lanekeeper" / "config.yaml"
 
     if config_file.exists() and not args.force:
         print(f"ℹ️ Configuration already exists at {config_file}. Use --force to re-initialize.")
@@ -48,10 +48,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     # Ensure worktree directory exists
     (root / cfg.worktree_dir).mkdir(parents=True, exist_ok=True)
 
-    print(f"✨ Initialized parallel-agents for '{project_name}'")
+    print(f"✨ Initialized lanekeeper for '{project_name}'")
     print(f"📁 Configuration written to {config_file}")
     print(f"📁 Worktrees directory: {cfg.worktree_dir}")
-    print("\nNext: Run 'parallel-agents doctor' or spawn an agent with 'parallel-agents spawn --name <name> --lane <lane> --task <task>'")
+    print("\nNext: Run 'lanekeeper doctor' or spawn an agent with 'lanekeeper spawn --name <name> --lane <lane> --task <task>'")
     return 0
 
 
@@ -72,7 +72,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("✅ Environment is clean and ready for parallel execution.")
         return 0
     else:
-        print(f"⚠️ {report.problem_count} problem(s) detected. Run 'parallel-agents repair' to fix.")
+        print(f"⚠️ {report.problem_count} problem(s) detected. Run 'lanekeeper repair' to fix.")
         return 1
 
 
@@ -94,7 +94,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         config = load_config()
         state_mgr = StateManager()
     except Exception as e:
-        print(f"❌ Error loading parallel-agents state: {e}", file=sys.stderr)
+        print(f"❌ Error loading lanekeeper state: {e}", file=sys.stderr)
         return 1
 
     agents = state_mgr.list_agents()
@@ -110,7 +110,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     print(f"\n📋 PARALLEL AGENTS — {config.project_name.upper()}\n")
     if not agents:
-        print("  No active agents found. Run 'parallel-agents spawn' to start one.\n")
+        print("  No active agents found. Run 'lanekeeper spawn' to start one.\n")
         return 0
 
     header = f"{'Agent ID':<12} {'Name':<14} {'Seat':<6} {'Lane':<12} {'Status':<10} {'Ports':<16} {'Task'}"
@@ -201,8 +201,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"  • Lane:     {lane}")
     print(f"  • Ports:    {ports_display}")
     print(f"  • Seat:     {seat}")
-    print(f"\nTo inspect:  parallel-agents inspect {agent_id}")
-    print(f"To validate: parallel-agents validate {agent_id}")
+    print(f"\nTo inspect:  lanekeeper inspect {agent_id}")
+    print(f"To validate: lanekeeper validate {agent_id}")
     return 0
 
 
@@ -303,7 +303,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
     for f in changed_files:
         norm_f = LaneEngine.normalize_path(f)
-        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(p) for p in (".parallel-agents/", ".git/")):
+        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(p) for p in (".lanekeeper/", ".git/")):
             continue
 
         violation = None
@@ -416,13 +416,13 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="parallel-agents",
+        prog="lanekeeper",
         description="Parallel Agents — Mechanical Safety & Coordination Tool for AI Coding Agents",
     )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # init
-    p_init = subparsers.add_parser("init", help="Initialize parallel-agents in current Git repository")
+    p_init = subparsers.add_parser("init", help="Initialize lanekeeper in current Git repository")
     p_init.add_argument("--name", help="Project name")
     p_init.add_argument("--force", action="store_true", help="Overwrite existing configuration")
     p_init.set_defaults(func=cmd_init)

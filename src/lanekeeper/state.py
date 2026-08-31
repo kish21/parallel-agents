@@ -52,7 +52,7 @@ class AgentState:
 
 from .lock import StateLock
 
-STATE_DIR = Path(".parallel-agents/state")
+STATE_DIR = Path(".lanekeeper/state")
 AGENTS_FILE = STATE_DIR / "agents.json"
 PORTS_FILE = STATE_DIR / "ports.json"
 

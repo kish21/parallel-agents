@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import generate_default_config
-from parallel_agents.state import AgentState, StateManager
-from parallel_agents.validator import Validator
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import generate_default_config
+from lanekeeper.state import AgentState, StateManager
+from lanekeeper.validator import Validator
+from lanekeeper.worktree import WorktreeManager
 
 
 class TestValidator(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestValidator(unittest.TestCase):
 
     def test_validate_in_lane_pass(self):
         branch = self.wt_mgr.make_branch_name("agent-001", "Auth API")
-        target_path = self.root / ".parallel-agents" / "worktrees" / "agent-001"
+        target_path = self.root / ".lanekeeper" / "worktrees" / "agent-001"
         wt_path = self.wt_mgr.create_worktree(target_path, branch)
         agent = AgentState(
             id="agent-001",
@@ -55,7 +55,7 @@ class TestValidator(unittest.TestCase):
 
     def test_validate_out_of_lane_fail(self):
         branch = self.wt_mgr.make_branch_name("agent-002", "Login UI")
-        target_path = self.root / ".parallel-agents" / "worktrees" / "agent-002"
+        target_path = self.root / ".lanekeeper" / "worktrees" / "agent-002"
         wt_path = self.wt_mgr.create_worktree(target_path, branch)
         agent = AgentState(
             id="agent-002",

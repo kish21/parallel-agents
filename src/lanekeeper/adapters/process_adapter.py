@@ -11,7 +11,7 @@ from typing import List, Optional
 from .base import AgentAdapter
 from ..state import AgentState, AgentStatus
 
-LOGS_DIR = Path(".parallel-agents/logs")
+LOGS_DIR = Path(".lanekeeper/logs")
 
 
 class ProcessAdapter(AgentAdapter):

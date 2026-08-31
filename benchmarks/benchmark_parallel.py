@@ -25,7 +25,7 @@ if hasattr(sys.stdout, "reconfigure"):
 PROJECT_SRC = Path(__file__).resolve().parent.parent / "src"
 
 def run(cmd_args: str, cwd=None):
-    cmd = f'python -m parallel_agents.cli {cmd_args}'
+    cmd = f'python -m lanekeeper.cli {cmd_args}'
     env = os.environ.copy()
     env["PYTHONPATH"] = str(PROJECT_SRC)
     res = subprocess.run(
@@ -104,7 +104,7 @@ def run_benchmark(cycles: int = 10) -> dict:
                     [
                         sys.executable,
                         "-m",
-                        "parallel_agents.cli",
+                        "lanekeeper.cli",
                         "spawn",
                         "--name",
                         name,

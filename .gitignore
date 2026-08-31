@@ -7,7 +7,7 @@ worktrees/
 .env
 .env.*
 !.env.example
-.parallel-agents/
+.lanekeeper/
 
 # Build artifacts & caches
 *.egg-info/

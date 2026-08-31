@@ -3,19 +3,40 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "parallel-agents"
+name = "lanekeeper"
 version = "0.1.0"
 description = "Mechanical Safety & Coordination Tool for Running Parallel AI Coding Agents"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "Parallel Agents Contributors" }]
+authors = [{ name = "Lanekeeper Contributors" }]
+keywords = ["ai-agents", "git-worktree", "parallel-development", "orchestration", "developer-tools"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Version Control :: Git",
+]
 dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/kish21/parallel-agents"
+Repository = "https://github.com/kish21/parallel-agents"
+Issues = "https://github.com/kish21/parallel-agents/issues"
+Changelog = "https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md"
+
 [project.scripts]
-parallel-agents = "parallel_agents.cli:main"
+lanekeeper = "lanekeeper.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

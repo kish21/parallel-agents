@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import generate_default_config
-from parallel_agents.ports import PortManager
-from parallel_agents.state import AgentState, StateManager
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import generate_default_config
+from lanekeeper.ports import PortManager
+from lanekeeper.state import AgentState, StateManager
+from lanekeeper.worktree import WorktreeManager
 
 
 class TestCleanup(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestCleanup(unittest.TestCase):
 
     def test_cleanup_deletes_worktree_and_reclaims_ports(self):
         branch = self.wt_mgr.make_branch_name("agent-001", "Task 1")
-        target_path = self.root / ".parallel-agents" / "worktrees" / "agent-001"
+        target_path = self.root / ".lanekeeper" / "worktrees" / "agent-001"
         wt_path = self.wt_mgr.create_worktree(target_path, branch)
         ports = self.port_mgr.allocate_ports_for_agent("agent-001")
         agent = AgentState(

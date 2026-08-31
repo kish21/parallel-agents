@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.cli import cmd_cleanup, cmd_init, cmd_spawn
-from parallel_agents.config import generate_default_config, save_config
-from parallel_agents.state import StateManager
+from lanekeeper.cli import cmd_cleanup, cmd_init, cmd_spawn
+from lanekeeper.config import generate_default_config, save_config
+from lanekeeper.state import StateManager
 
 
 class TestE2EConcurrent(unittest.TestCase):
@@ -172,7 +172,7 @@ class TestE2EConcurrent(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "parallel_agents.cli",
+                    "lanekeeper.cli",
                     "spawn",
                     "--name",
                     f"proc-worker-{i}",

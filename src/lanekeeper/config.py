@@ -1,4 +1,4 @@
-"""Configuration management for parallel-agents."""
+"""Configuration management for lanekeeper."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class Config:
     version: int = 1
     project_name: str = "parallel-project"
     max_agents: int = 4
-    worktree_dir: str = ".parallel-agents/worktrees"
+    worktree_dir: str = ".lanekeeper/worktrees"
     lanes: Dict[str, LaneConfig] = field(default_factory=dict)
     port_ranges: Dict[str, PortRange] = field(default_factory=dict)
     git: GitConfig = field(default_factory=GitConfig)
@@ -57,7 +57,7 @@ class Config:
             version=1,
             project_name=project_name,
             max_agents=4,
-            worktree_dir=".parallel-agents/worktrees",
+            worktree_dir=".lanekeeper/worktrees",
             lanes={
                 "backend": LaneConfig(
                     name="backend",
@@ -161,7 +161,7 @@ class Config:
             version=data.get("version", 1),
             project_name=project_data.get("name", "my-project"),
             max_agents=defaults_data.get("max_agents", 4),
-            worktree_dir=defaults_data.get("worktree_dir", ".parallel-agents/worktrees"),
+            worktree_dir=defaults_data.get("worktree_dir", ".lanekeeper/worktrees"),
             lanes=lanes,
             port_ranges=port_ranges,
             git=GitConfig(
@@ -176,7 +176,7 @@ class Config:
         )
 
 
-CONFIG_PATH = Path(".parallel-agents/config.yaml")
+CONFIG_PATH = Path(".lanekeeper/config.yaml")
 
 
 def generate_default_config(project_name: str = "my-project") -> Config:
@@ -189,7 +189,7 @@ def load_config(root_dir: Optional[Path] = None) -> Config:
     cfg_file = root / CONFIG_PATH
     if not cfg_file.exists():
         raise FileNotFoundError(
-            f"No parallel-agents configuration found at {cfg_file}. Run 'parallel-agents init' first."
+            f"No lanekeeper configuration found at {cfg_file}. Run 'lanekeeper init' first."
         )
     with open(cfg_file, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}

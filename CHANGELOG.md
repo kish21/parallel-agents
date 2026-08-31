@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the `parallel-agents` framework and scaffolding will be documented in this file.
+All notable changes to the `lanekeeper` framework and scaffolding will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `05-github-mechanics.md`: Board single-select fields (`Lane`, `Seat`, `Owner`), disjoint milestones, sub-issues, and single-account routing.
   - `06-free-tier-ops.md`: Public vs. private repository matrix, verified mirror sync scripts, divergence checkers, and CI minute optimizations.
 - **Scaffolding & Tooling**:
-  - **`parallel-agents` Python CLI (`src/parallel_agents/`)**: Turnkey tool implementing `init`, `doctor`, `spawn`, `status`, `diff`, `validate`, `inspect`, `logs`, `stop`, `restart`, `repair`, and `cleanup`.
-  - **Automated Worktree & Branch Manager**: Automatically provisions worktrees (`.parallel-agents/worktrees/`) on deterministic branches (`parallel/<agent-id>/<task>`).
+  - **`lanekeeper` Python CLI (`src/lanekeeper/`)**: Turnkey tool implementing `init`, `doctor`, `spawn`, `status`, `diff`, `validate`, `inspect`, `logs`, `stop`, `restart`, `repair`, and `cleanup`.
+  - **Automated Worktree & Branch Manager**: Automatically provisions worktrees (`.lanekeeper/worktrees/`) on deterministic branches (`parallel/<agent-id>/<task>`).
   - **Mechanical Lane Path Engine**: Glob-based `allow`/`deny` validator that fails with non-zero exit codes if an agent touches out-of-lane files.
   - **Collision-Free Port Allocator**: Provisions non-conflicting port pairs and injects them into isolated `.env` and `.lane` files.
   - **Diagnostics & Recovery**: Self-repair and health diagnostic suite (`doctor` and `repair`).

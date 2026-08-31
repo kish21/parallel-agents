@@ -58,9 +58,9 @@ agent-001 → "Implement user authentication"
 ### 2. Worktree
 Each agent gets its own physical Git working directory.
 ```
-Agent 1 → .parallel-agents/worktrees/agent-001
-Agent 2 → .parallel-agents/worktrees/agent-002
-Agent 3 → .parallel-agents/worktrees/agent-003
+Agent 1 → .lanekeeper/worktrees/agent-001
+Agent 2 → .lanekeeper/worktrees/agent-002
+Agent 3 → .lanekeeper/worktrees/agent-003
 ```
 Agents never edit the same physical files simultaneously.
 
@@ -101,13 +101,13 @@ pip install -e .
 ### 2. Initialize the Repository
 From your project root:
 ```bash
-parallel-agents init
+lanekeeper init
 ```
-This creates the `.parallel-agents/` configuration and state directories.
+This creates the `.lanekeeper/` configuration and state directories.
 
 ### 3. Create an Agent
 ```bash
-parallel-agents spawn \
+lanekeeper spawn \
   --name backend-1 \
   --lane backend \
   --task "Implement user authentication"
@@ -116,7 +116,7 @@ Parallel Agents provisions the isolated worktree, branch, `.env`, and dedicated 
 
 ### 4. Create Another Agent
 ```bash
-parallel-agents spawn \
+lanekeeper spawn \
   --name frontend-1 \
   --lane frontend \
   --task "Build the login interface"
@@ -125,7 +125,7 @@ Now both agents can work simultaneously without collision.
 
 ### 5. Check Agents
 ```bash
-$ parallel-agents status
+$ lanekeeper status
 
 📋 PARALLEL AGENTS — MY-PROJECT
 
@@ -137,7 +137,7 @@ agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Buil
 
 ### 6. Validate an Agent's Work
 ```bash
-$ parallel-agents validate agent-001
+$ lanekeeper validate agent-001
 
 🛡️ VALIDATION REPORT: backend-1 (agent-001)
 Lane: backend
@@ -151,17 +151,17 @@ Lane: backend
 
 ### 7. Inspect Changed Files
 ```bash
-parallel-agents diff agent-001
+lanekeeper diff agent-001
 ```
 
 ### 8. Stop an Agent
 ```bash
-parallel-agents stop agent-001
+lanekeeper stop agent-001
 ```
 
 ### 9. Clean Up Safely
 ```bash
-parallel-agents cleanup agent-001
+lanekeeper cleanup agent-001
 ```
 
 ---
@@ -255,12 +255,12 @@ CREATED ──► STARTING ──► RUNNING ──┬──► COMPLETED ──
 
 Useful commands:
 ```bash
-parallel-agents status
-parallel-agents logs backend-1
-parallel-agents stop backend-1
-parallel-agents restart backend-1
-parallel-agents repair backend-1
-parallel-agents cleanup backend-1
+lanekeeper status
+lanekeeper logs backend-1
+lanekeeper stop backend-1
+lanekeeper restart backend-1
+lanekeeper repair backend-1
+lanekeeper cleanup backend-1
 ```
 
 ---
@@ -270,7 +270,7 @@ parallel-agents cleanup backend-1
 Never rely on an AI agent's word that its work is complete. Parallel Agents independently validates:
 
 ```bash
-$ parallel-agents validate backend-1
+$ lanekeeper validate backend-1
 
 Validation: backend-1
 
@@ -306,7 +306,7 @@ Result: FAIL (Exit code 2)
 If an agent process crashes or an orphaned port is left behind:
 
 ```bash
-$ parallel-agents doctor
+$ lanekeeper doctor
 
 🩺 PARALLEL AGENTS DOCTOR
 
@@ -321,7 +321,7 @@ $ parallel-agents doctor
 
 Run repair to automatically clean up orphaned resources:
 ```bash
-parallel-agents repair
+lanekeeper repair
 ```
 
 ---
@@ -367,18 +367,18 @@ The orchestration layer handles isolation, ports, and validation; the adapter ha
 
 | Command | Purpose |
 | :--- | :--- |
-| **`parallel-agents init`** | Initializes repository and creates configuration. |
-| **`parallel-agents doctor`** | Diagnoses repository, worktree, and port health. |
-| **`parallel-agents spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
-| **`parallel-agents status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
-| **`parallel-agents validate`** | Mechanically validates lane compliance and runs test suites. |
-| **`parallel-agents diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
-| **`parallel-agents inspect`** | Shows detailed agent metadata and environment variables. |
-| **`parallel-agents logs`** | Tails structured execution logs for an agent session. |
-| **`parallel-agents stop`** | Stops an active agent process. |
-| **`parallel-agents restart`** | Restarts an agent in its worktree. |
-| **`parallel-agents repair`** | Repairs stale states and releases orphaned ports. |
-| **`parallel-agents cleanup`** | Safely removes worktrees and releases port allocations. |
+| **`lanekeeper init`** | Initializes repository and creates configuration. |
+| **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
+| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
+| **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
+| **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
+| **`lanekeeper diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
+| **`lanekeeper inspect`** | Shows detailed agent metadata and environment variables. |
+| **`lanekeeper logs`** | Tails structured execution logs for an agent session. |
+| **`lanekeeper stop`** | Stops an active agent process. |
+| **`lanekeeper restart`** | Restarts an agent in its worktree. |
+| **`lanekeeper repair`** | Repairs stale states and releases orphaned ports. |
+| **`lanekeeper cleanup`** | Safely removes worktrees and releases port allocations. |
 
 ---
 

@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import generate_default_config
-from parallel_agents.doctor import Doctor
-from parallel_agents.state import AgentState, StateManager
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import generate_default_config
+from lanekeeper.doctor import Doctor
+from lanekeeper.state import AgentState, StateManager
+from lanekeeper.worktree import WorktreeManager
 
 
 class TestDoctor(unittest.TestCase):
