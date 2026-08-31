@@ -165,7 +165,7 @@ Now both agents can work simultaneously without collision.
 ```bash
 $ lanekeeper status
 
-📋 PARALLEL AGENTS — MY-PROJECT
+📋 LANEKEEPER — MY-PROJECT
 
 Agent ID     Name           Seat   Lane         Status     Ports            Task
 ----------------------------------------------------------------------------------------------------
@@ -207,7 +207,7 @@ lanekeeper cleanup agent-001
 ## How It Works
 
 ```
-WITHOUT PARALLEL AGENTS:                      WITH PARALLEL AGENTS:
+WITHOUT LANEKEEPER:                           WITH LANEKEEPER:
 
 Agent A ─────┐                                      Git Repository
              │                                            │
@@ -426,7 +426,7 @@ If an agent process crashes or an orphaned port is left behind:
 ```bash
 $ lanekeeper doctor
 
-🩺 PARALLEL AGENTS DOCTOR
+🩺 LANEKEEPER DOCTOR
 
   ✓ Git repository: Valid Git repository detected.
   ✓ Configuration: Valid config (Project: demo, Max agents: 4).
@@ -572,7 +572,7 @@ python benchmarks/benchmark_parallel.py --cycles 5
 ```
 ```
 ======================================================================
-📈 PARALLEL AGENTS: BENCHMARK RESULTS & SYSTEM RELIABILITY METRICS
+📈 LANEKEEPER: BENCHMARK RESULTS & SYSTEM RELIABILITY METRICS
 ======================================================================
   • Total Cycles Executed:        5 / 5
   • Total Agents Spawned:         15
