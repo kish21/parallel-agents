@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.5.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.6.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run multiple AI coding agents safely in the same repository.**
@@ -356,6 +356,39 @@ Agent 3 → Port 8003 / 3003
 ```
 
 Allocations are deterministic, checked against the host OS socket state, injected into `.env`, and released upon cleanup.
+
+### Service URLs
+
+A port number on its own does not connect anything. Browser build tools expose only their
+own prefixed variables to client code — Vite reads `VITE_*`, Next.js reads
+`NEXT_PUBLIC_*` — so a frontend handed `API_PORT=8002` cannot see it, and falls back to
+whatever server is compiled into its source. That is usually another agent's backend.
+
+`lanekeeper init` therefore reads the dependencies your repository declares and writes
+the matching URL variables into `.lanekeeper/config.yaml`:
+
+```yaml
+environment:
+  host: 127.0.0.1
+  url_templates:
+    API_URL: http://${HOST}:${BACKEND_PORT}
+    VITE_API_URL: http://${HOST}:${BACKEND_PORT}
+    FRONTEND_URL: http://${HOST}:${FRONTEND_PORT}
+```
+
+Each agent's `.env` then resolves them against its own ports:
+
+```bash
+# .lanekeeper/worktrees/agent-002/.env
+BACKEND_PORT='8002'
+VITE_API_URL='http://127.0.0.1:8002'   # agent-002's own backend, never agent-001's
+```
+
+Add, remove, or rename templates to suit your stack; a template naming a port category
+your project does not define is dropped rather than written half-expanded.
+
+Lanekeeper does **not** install dependencies. A fresh worktree has no `node_modules` or
+virtualenv, so run your usual install command in it before starting a dev server.
 
 ---
 
