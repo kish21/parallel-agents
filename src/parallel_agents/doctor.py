@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 from .adapters.process_adapter import ProcessAdapter
+from .capabilities import CapabilityRegistry
 from .config import Config, load_config
 from .ports import PortManager
 from .state import AgentState, AgentStatus, StateManager
@@ -140,7 +141,53 @@ class Doctor:
                 )
             )
 
-        # 5. Agent Process Liveness Check
+        # 5. Capability Card Health
+        #
+        # A configured gate that cannot be evaluated is worse than no gate: it blocks work
+        # without expressing a policy. These checks catch the ways that happens.
+        try:
+            registry = CapabilityRegistry.load(self.root_dir)
+            card_problems = []
+
+            if cfg.capability_gates and registry.is_empty:
+                card_problems.append(
+                    f"{len(cfg.capability_gates)} capability gate(s) configured but no cards declared; "
+                    f"every validation will fail closed.")
+
+            for a in agents:
+                if cfg.capability_gates and not registry.has_seat(a.seat):
+                    card_problems.append(f"Agent '{a.id}' has seat '{a.seat}' with no capability card.")
+
+            for seat, card in registry.cards.items():
+                for lane in card.max_allowed_lane_scope:
+                    if lane not in cfg.lanes:
+                        card_problems.append(
+                            f"Seat '{seat}' scope names lane '{lane}', which is not declared in config.")
+                for gate_name in cfg.capability_gates:
+                    if not card.declares(gate_name):
+                        card_problems.append(
+                            f"Seat '{seat}' does not rate '{gate_name}'; it is treated as unavailable.")
+
+            # A lane no seat may enter cannot be worked at all.
+            if registry.cards:
+                for lane in cfg.lanes:
+                    if not any(c.allows_lane(lane) for c in registry.cards.values()):
+                        card_problems.append(f"No declared seat is permitted in lane '{lane}'.")
+
+            if not card_problems:
+                msg = (f"{len(registry)} capability card(s), {len(cfg.capability_gates)} gate(s) consistent."
+                       if registry.cards else "No capability gates or cards configured.")
+                report.checks.append(DiagnosticCheck(name="Capability cards", passed=True, message=msg))
+            else:
+                report.checks.append(DiagnosticCheck(
+                    name="Capability cards", passed=False,
+                    message=f"{len(card_problems)} capability card issue(s) detected.",
+                    details="\n".join(card_problems)))
+        except Exception as e:
+            report.checks.append(DiagnosticCheck(
+                name="Capability cards", passed=False, message=f"Capability card error: {e}"))
+
+        # 6. Agent Process Liveness Check
         proc_problems = []
         for a in agents:
             if a.status == AgentStatus.RUNNING.value and a.pid:
@@ -184,8 +231,9 @@ class Doctor:
                     self.state.save_agent(a)
                     actions_taken.append(f"Updated agent '{a.id}' status to FAILED (process had died).")
 
-        # 2. Prune Git worktrees
-        self.worktree_mgr.prune()
+        # 2. Prune Git worktrees (repository-mutating: serialise with spawn/cleanup)
+        with self.state.git_lock():
+            self.worktree_mgr.prune()
         actions_taken.append("Pruned stale Git worktree registrations.")
 
         # 3. Clean orphaned port records

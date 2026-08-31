@@ -1,54 +1,112 @@
-name: CI Validation
+name: CI
 
 on:
+  # Every branch, not just main. Feature branches are where agents actually work, so
+  # leaving them unchecked defeats the point of having a gate.
+  #
+  # 06-free-tier-ops.md argues for restricting triggers to conserve the Actions
+  # allowance, but that section applies to *private* repositories. This repository is
+  # public, where the same document records minutes as unmetered — so the restriction
+  # bought nothing here except unverified branches.
+  #
+  # A same-repo branch with an open PR runs twice (push + pull_request). That is the
+  # accepted cost of keeping the pull_request trigger, which is what covers PRs from
+  # forks; superseded runs are cancelled below.
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate Scripts & Documentation
+  shell-and-docs:
+    name: Shell syntax & required files
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate Shell Scripts Syntax
+      - name: Validate shell script syntax
         run: |
           bash -n bootstrap.sh
           bash -n templates/git-hooks/pre-push
           bash -n templates/git-hooks/pre-commit
-          echo "✅ All shell scripts have valid syntax."
 
-      - name: Verify Required Files Exist
+      - name: Verify required files exist
         run: |
-          test -f README.md
-          test -f CONTRIBUTING.md
-          test -f SECURITY.md
-          test -f LICENSE
-          test -f CHANGELOG.md
-          test -f VERSION
-          test -f 01-working-agreement.md
-          test -f 02-conflict-management.md
-          test -f 03-orchestration.md
-          test -f 04-agent-setup.md
-      - name: Set up Python
-        uses: actions/setup-python@v5
+          for f in README.md CONTRIBUTING.md SECURITY.md LICENSE CHANGELOG.md VERSION \
+                   01-working-agreement.md 02-conflict-management.md \
+                   03-orchestration.md 04-agent-setup.md; do
+            test -f "$f" || { echo "missing: $f"; exit 1; }
+          done
+
+      - name: VERSION must match pyproject
+        run: |
+          v_file=$(tr -d '[:space:]' < VERSION)
+          v_proj=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          echo "VERSION=$v_file pyproject=$v_proj"
+          test "$v_file" = "$v_proj" || { echo "VERSION and pyproject.toml disagree"; exit 1; }
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The full supported range declared in pyproject (requires-python = ">=3.9").
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          # Cross-platform smoke: the locking layer has separate Windows and POSIX paths.
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Configure git identity (required by worktree tests)
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+
+      - name: Install
         run: |
           python -m pip install --upgrade pip
           pip install -e .
 
-      - name: Run Automated Test Suite (30 Unit, Concurrency & Failure Recovery Tests)
+      - name: Byte-compile all sources
+        run: python -m compileall -q src tests benchmarks
+
+      - name: Run test suite
+        run: python -m unittest discover -v tests
+
+  reliability:
+    name: Reliability benchmark
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Configure git identity
         run: |
-          python -m unittest discover tests
-          echo "✅ All 30 unit, integration, stress, and failure recovery tests passed."
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      # Exits non-zero on any collision, leak, or undetected lane violation.
+      - name: Benchmark (gates on measured results)
+        run: python benchmarks/benchmark_parallel.py --cycles 3

@@ -9,6 +9,26 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 
+class UnknownLaneError(KeyError):
+    """Raised when a lane is referenced that is not declared in the configuration.
+
+    Lane lookup fails closed: an undeclared lane is a configuration error, never a
+    silently-permissive lane. See ``Config.get_lane``.
+    """
+
+    def __init__(self, lane_name: str, known_lanes: List[str]):
+        self.lane_name = lane_name
+        self.known_lanes = sorted(known_lanes)
+        known = ", ".join(self.known_lanes) if self.known_lanes else "(none declared)"
+        super().__init__(
+            f"Unknown lane '{lane_name}'. Declared lanes: {known}."
+        )
+
+    def __str__(self) -> str:
+        # KeyError.__str__ wraps the message in repr quotes; restore the plain text.
+        return self.args[0]
+
+
 @dataclass
 class LaneConfig:
     name: str
@@ -29,8 +49,32 @@ class DatabaseConfig:
 
 
 @dataclass
+class QualityCommand:
+    """A quality command, optionally satisfying a capability gate.
+
+    `satisfies` is what makes the `author-required` state meaningful: a seat that cannot
+    perform a capability natively may still proceed if the verified script written for it
+    ran and passed.
+    """
+
+    command: str
+    satisfies: Optional[str] = None
+
+
+@dataclass
 class QualityConfig:
-    commands: List[str] = field(default_factory=list)
+    commands: List[QualityCommand] = field(default_factory=list)
+
+    def satisfying(self, capability: str) -> List[QualityCommand]:
+        return [c for c in self.commands if c.satisfies == capability]
+
+
+@dataclass
+class CapabilityGate:
+    """Paths whose modification requires a named capability."""
+
+    capability: str
+    paths: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -50,6 +94,22 @@ class Config:
     git: GitConfig = field(default_factory=GitConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    capability_gates: Dict[str, CapabilityGate] = field(default_factory=dict)
+
+    def get_lane(self, lane_name: str) -> LaneConfig:
+        """Returns the declared lane, or raises UnknownLaneError.
+
+        This is the only supported way to resolve a lane. It deliberately has no
+        permissive fallback: an unrecognised lane must stop the operation rather
+        than produce a lane that allows every path.
+        """
+        lane = self.lanes.get(lane_name)
+        if lane is None:
+            raise UnknownLaneError(lane_name, list(self.lanes.keys()))
+        return lane
+
+    def has_lane(self, lane_name: str) -> bool:
+        return lane_name in self.lanes
 
     @classmethod
     def default(cls, project_name: str = "my-project") -> Config:
@@ -90,6 +150,19 @@ class Config:
             ),
             quality=QualityConfig(commands=[]),
             database=DatabaseConfig(strategy="per-agent", name_template="app_${AGENT_ID}"),
+            # The mechanical form of the rule in 01-working-agreement.md: stop when the
+            # change touches money, auth, tenant isolation, or a migration.
+            capability_gates={
+                "security_review": CapabilityGate(
+                    capability="security_review",
+                    paths=["**/auth/**", "**/authentication/**", "**/payments/**",
+                           "**/billing/**", "**/tenant/**", "**/tenants/**", "secrets/**"],
+                ),
+                "database_migrations": CapabilityGate(
+                    capability="database_migrations",
+                    paths=["database/migrations/**", "migrations/**"],
+                ),
+            },
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -116,7 +189,17 @@ class Config:
                 "protected_branches": self.git.protected_branches,
                 "branch_prefix": self.git.branch_prefix,
             },
-            "quality": {"commands": self.quality.commands},
+            "quality": {
+                "commands": [
+                    c.command if c.satisfies is None
+                    else {"command": c.command, "satisfies": c.satisfies}
+                    for c in self.quality.commands
+                ]
+            },
+            "capability_gates": {
+                name: {"paths": gate.paths}
+                for name, gate in self.capability_gates.items()
+            },
             "database": {
                 "strategy": self.database.strategy,
                 "name_template": self.database.name_template,
@@ -132,6 +215,7 @@ class Config:
         git_data = data.get("git", {})
         quality_data = data.get("quality", {})
         db_data = data.get("database", {})
+        gates_data = data.get("capability_gates", {}) or {}
 
         lanes = {}
         if isinstance(lanes_data, list):
@@ -168,12 +252,35 @@ class Config:
                 protected_branches=git_data.get("protected_branches", ["main", "master"]),
                 branch_prefix=git_data.get("branch_prefix", "parallel/"),
             ),
-            quality=QualityConfig(commands=quality_data.get("commands", [])),
+            quality=QualityConfig(commands=_parse_quality_commands(quality_data.get("commands", []))),
             database=DatabaseConfig(
                 strategy=db_data.get("strategy", "per-agent"),
                 name_template=db_data.get("name_template", "app_${AGENT_ID}"),
             ),
+            capability_gates={
+                str(name): CapabilityGate(
+                    capability=str(name),
+                    paths=[str(p) for p in (spec or {}).get("paths", []) or []],
+                )
+                for name, spec in gates_data.items()
+            },
         )
+
+
+def _parse_quality_commands(raw: Any) -> List[QualityCommand]:
+    """Accepts plain strings (the original format) and {command, satisfies} objects."""
+    parsed: List[QualityCommand] = []
+    for item in raw or []:
+        if isinstance(item, str):
+            parsed.append(QualityCommand(command=item))
+        elif isinstance(item, dict):
+            cmd = item.get("command")
+            if not cmd:
+                continue
+            satisfies = item.get("satisfies")
+            parsed.append(QualityCommand(command=str(cmd),
+                                         satisfies=str(satisfies) if satisfies else None))
+    return parsed
 
 
 CONFIG_PATH = Path(".parallel-agents/config.yaml")

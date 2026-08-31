@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import fnmatch
+import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import List, Optional
 from .config import LaneConfig
@@ -37,29 +39,57 @@ class LaneEngine:
         return path_str.strip("/")
 
     @staticmethod
-    def match_glob(path_str: str, pattern: str) -> bool:
-        """Matches posix path string against a glob pattern with ** support."""
-        norm_pattern = pattern.replace("\\", "/").lstrip("/")
-        norm_path = path_str
+    @lru_cache(maxsize=512)
+    def _compile(pattern: str) -> "re.Pattern[str]":
+        """Translates a path glob into an anchored regex.
 
-        # Exact match
+        Segment-aware, which the previous implementation was not:
+
+        * ``**``  matches zero or more whole path segments
+        * ``*``   matches within one segment (never crosses ``/``)
+        * ``?``   matches a single character within one segment
+
+        The earlier version short-circuited on any pattern ending in ``/**`` and returned
+        a prefix comparison, so a pattern that both began with ``**/`` and ended with
+        ``/**`` — e.g. ``**/secrets/**`` — could never match anything. A lane denying that
+        path silently denied nothing.
+        """
+        parts = pattern.split("/")
+        out = ["^"]
+        for i, part in enumerate(parts):
+            last = i == len(parts) - 1
+            if part == "**":
+                # Trailing ** absorbs the remainder; an interior ** spans whole segments.
+                out.append(".*" if last else "(?:[^/]+/)*")
+                continue
+            segment = ""
+            for ch in part:
+                if ch == "*":
+                    segment += "[^/]*"
+                elif ch == "?":
+                    segment += "[^/]"
+                else:
+                    segment += re.escape(ch)
+            out.append(segment)
+            if not last:
+                out.append("/")
+        out.append("$")
+        return re.compile("".join(out))
+
+    @classmethod
+    def match_glob(cls, path_str: str, pattern: str) -> bool:
+        """Matches a posix path string against a glob pattern with full ** support."""
+        norm_pattern = pattern.replace("\\", "/").lstrip("/")
+        norm_path = path_str.replace("\\", "/").strip("/")
+
         if norm_pattern == norm_path:
             return True
 
-        # Directory wildcard (e.g. 'src/backend/**')
-        if norm_pattern.endswith("/**"):
-            prefix = norm_pattern[:-3]
-            return norm_path == prefix or norm_path.startswith(prefix + "/")
+        # A trailing '/**' also matches the directory itself, not only its contents.
+        if norm_pattern.endswith("/**") and norm_path == norm_pattern[:-3]:
+            return True
 
-        # Prefix wildcard (e.g. '**/test_*.py')
-        if norm_pattern.startswith("**/"):
-            suffix = norm_pattern[3:]
-            filename = PurePosixPath(norm_path).name
-            if fnmatch.fnmatch(filename, suffix) or fnmatch.fnmatch(norm_path, suffix):
-                return True
-
-        # Standard fnmatch
-        return fnmatch.fnmatch(norm_path, norm_pattern)
+        return bool(cls._compile(norm_pattern).match(norm_path))
 
     @classmethod
     def check_file(cls, filepath: str | Path, lane: LaneConfig) -> Optional[LaneViolation]:

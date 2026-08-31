@@ -18,16 +18,40 @@ class FileLockError(Exception):
 
 
 class StateLock:
-    """Provides a cross-platform re-entrant file and thread lock around state operations."""
+    """Cross-platform re-entrant lock combining an in-process RLock and an OS file lock.
 
-    # In-process re-entrant lock for thread safety
-    _process_rlock = threading.RLock()
+    The file lock serialises across processes; the RLock serialises across threads within
+    one process (an OS file lock is held per-process, so threads would otherwise pass
+    straight through each other's locks).
+
+    The RLock is scoped **per lock file**, not per class. A single shared RLock would make
+    every independent lock in the process serialise against every other one — two lock
+    files in different directories, or the state lock and the git lock, would block each
+    other for no reason.
+    """
+
+    # Per-lock-file re-entrant locks, created on demand.
+    _rlocks: dict = {}
+    _registry_guard = threading.Lock()
     # Thread-local storage for OS file descriptor tracking
     _tls = threading.local()
 
     def __init__(self, lock_dir: Path, lock_name: str = ".lock", timeout_seconds: float = 10.0):
         self.lock_file = lock_dir / lock_name
         self.timeout_seconds = timeout_seconds
+        # resolve() needs the parent to exist to be stable across calls.
+        self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+        self._key = str(self.lock_file.resolve())
+        self._process_rlock = self._rlock_for(self._key)
+
+    @classmethod
+    def _rlock_for(cls, key: str) -> threading.RLock:
+        with cls._registry_guard:
+            lock = cls._rlocks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                cls._rlocks[key] = lock
+            return lock
 
     def acquire(self) -> None:
         self._process_rlock.acquire()
@@ -38,7 +62,7 @@ class StateLock:
             if not hasattr(self._tls, "fd_map"):
                 self._tls.fd_map = {}
 
-            lock_key = str(self.lock_file.resolve())
+            lock_key = self._key
             depth = self._tls.depth_map.get(lock_key, 0)
 
             # Re-entrant: already holding file lock in this thread
@@ -83,7 +107,7 @@ class StateLock:
             if not hasattr(self._tls, "depth_map") or not hasattr(self._tls, "fd_map"):
                 return
 
-            lock_key = str(self.lock_file.resolve())
+            lock_key = self._key
             depth = self._tls.depth_map.get(lock_key, 0)
 
             if depth > 1:

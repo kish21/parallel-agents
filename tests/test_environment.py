@@ -37,16 +37,16 @@ class TestEnvironmentManager(unittest.TestCase):
         self.assertTrue(lane_file.exists())
 
         env_content = env_file.read_text(encoding="utf-8")
-        self.assertIn('PORT="8001"', env_content)
-        self.assertIn('BACKEND_PORT="8001"', env_content)
-        self.assertIn('FRONTEND_PORT="3001"', env_content)
-        self.assertIn('AGENT_ID="agent-001"', env_content)
-        self.assertIn('DATABASE_NAME="app_agent_001"', env_content)
+        self.assertIn("PORT='8001'", env_content)
+        self.assertIn("BACKEND_PORT='8001'", env_content)
+        self.assertIn("FRONTEND_PORT='3001'", env_content)
+        self.assertIn("AGENT_ID='agent-001'", env_content)
+        self.assertIn("DATABASE_NAME='app_agent_001'", env_content)
 
         lane_content = lane_file.read_text(encoding="utf-8")
-        self.assertIn('SEAT="SR1"', lane_content)
-        self.assertIn('ROLE="sr1"', lane_content)
-        self.assertIn('LANE="backend"', lane_content)
+        self.assertIn("SEAT='SR1'", lane_content)
+        self.assertIn("ROLE='sr1'", lane_content)
+        self.assertIn("LANE='backend'", lane_content)
 
 
 if __name__ == "__main__":
