@@ -44,6 +44,22 @@ class PortRange:
 
 
 @dataclass
+class EnvironmentConfig:
+    """How an agent's generated `.env` describes the services it should talk to.
+
+    `url_templates` maps a variable name to a template expanded against that agent's own
+    generated values (`${HOST}`, `${BACKEND_PORT}`, `${FRONTEND_PORT}`, `${AGENT_ID}`,
+    ...). Ports alone cannot wire a frontend to a backend, because browser build tools
+    only expose variables carrying their own prefix; the prefixed names are chosen from
+    the repository's declared dependencies at `init` time and kept here as editable
+    configuration. See `lanekeeper.frameworks`.
+    """
+
+    host: str = "127.0.0.1"
+    url_templates: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class DatabaseConfig:
     strategy: str = "per-agent"
     name_template: str = "app_${AGENT_ID}"
@@ -95,6 +111,7 @@ class Config:
     git: GitConfig = field(default_factory=GitConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     capability_gates: Dict[str, CapabilityGate] = field(default_factory=dict)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
@@ -151,6 +168,16 @@ class Config:
             ),
             quality=QualityConfig(commands=[]),
             database=DatabaseConfig(strategy="per-agent", name_template="app_${AGENT_ID}"),
+            # Overwritten by `init` with the prefixes this repository's frontends read.
+            # The unprefixed pair is the safe floor: server-side code reads it directly.
+            environment=EnvironmentConfig(
+                host="127.0.0.1",
+                url_templates={
+                    "API_URL": "http://${HOST}:${BACKEND_PORT}",
+                    "BACKEND_URL": "http://${HOST}:${BACKEND_PORT}",
+                    "FRONTEND_URL": "http://${HOST}:${FRONTEND_PORT}",
+                },
+            ),
             # The mechanical form of the rule in 01-working-agreement.md: stop when the
             # change touches money, auth, tenant isolation, or a migration.
             capability_gates={
@@ -205,6 +232,10 @@ class Config:
                 "strategy": self.database.strategy,
                 "name_template": self.database.name_template,
             },
+            "environment": {
+                "host": self.environment.host,
+                "url_templates": dict(self.environment.url_templates),
+            },
         }
 
     @classmethod
@@ -216,6 +247,7 @@ class Config:
         git_data = data.get("git", {})
         quality_data = data.get("quality", {})
         db_data = data.get("database", {})
+        env_data = data.get("environment", {}) or {}
         gates_data = data.get("capability_gates", {}) or {}
 
         lanes = {}
@@ -257,6 +289,13 @@ class Config:
             database=DatabaseConfig(
                 strategy=db_data.get("strategy", "per-agent"),
                 name_template=db_data.get("name_template", "app_${AGENT_ID}"),
+            ),
+            environment=EnvironmentConfig(
+                host=str(env_data.get("host", "127.0.0.1")),
+                url_templates={
+                    str(k): str(v)
+                    for k, v in (env_data.get("url_templates", {}) or {}).items()
+                },
             ),
             capability_gates={
                 str(name): CapabilityGate(

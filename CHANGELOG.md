@@ -10,6 +10,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.6.0]
+
+Everything here comes from running the CLI against a real full-stack application — a live
+backend and a live Vite dev server per agent — rather than against temporary directories
+and stub agents. Three of the guarantees the tool advertises did not survive that.
+
+### Fixed
+
+- **A generated `.env` did not connect a frontend to its own backend.** It wrote port
+  numbers only. Browser build tools expose just their own prefixed variables to client
+  code, so a Vite bundle could see `VITE_PORT` — its *own* dev-server port — but not
+  `API_PORT`, and fell through to the server compiled into its source. Two agents' running
+  frontends both addressed a third, unrelated process. `init` now reads the repository's
+  declared dependencies and writes the URL variables that stack can actually read; the
+  names live in `config.yaml` under `environment.url_templates` and are expanded against
+  each agent's own ports. A template naming a port category the project does not define is
+  dropped, never emitted half-expanded.
+
+- **`repair` could not converge.** Marking a dead agent `FAILED` turned its live port
+  reservations into orphans, and the port-cleanup pass only released ports belonging to
+  agents missing from state altogether — so it never cleared what it had just created.
+  `doctor` said "run repair", repair reported success, and the same problems were reported
+  indefinitely. Every state the pass can create, it now also resolves: ports held by
+  terminal agents are released, an agent whose worktree has vanished is reconciled, and a
+  finished agent with no worktree is no longer reported as a fault at all.
+
+- **`cleanup` reported success it had not achieved.** A failed `git worktree remove` was
+  downgraded to a warning while the summary still printed success and exited 0; ports were
+  released while a server was still bound to them, and the state record was deleted, after
+  which nothing named the leftover directory. It removes the worktree first and treats
+  failure as failure — keeping the ports, the record and a `cleanup_failed` marker so
+  `doctor` can still see the problem and `repair` knows not to release resources that are
+  deliberately retained. A directory git has already disowned is removed directly, so a
+  retried cleanup can finish instead of failing forever on "is not a working tree".
+
+- **Agent ids were reused.** An id names a directory, so a recycled id resolved to a path a
+  previous agent might still occupy, and `git worktree add` failed on a directory nothing
+  in state referred to. Ids are now monotonic, backed by a persisted high-water mark that
+  is reconciled against live state so a lost counter can only resume the sequence.
+
+### Added
+
+- `lanekeeper.frameworks` — detects the client-visible environment prefixes a repository's
+  frontends read (Vite, Next.js, CRA, Nuxt, SvelteKit, Astro, Remix, Gatsby, Expo,
+  Angular), used to seed `environment.url_templates` at `init`.
+- `doctor` reports directories under the worktree root that no agent claims, and agents
+  whose cleanup did not finish. Both are marked as *not* automatically repairable, and
+  `doctor` now only recommends `repair` when something is actually repairable.
+- `spawn` refuses a target path that already exists, naming the cause, instead of failing
+  inside git.
+
+---
+
 ## [v0.5.0]
 
 The project is now called **lanekeeper**. Nothing had been published under the previous

@@ -8,7 +8,7 @@ from typing import List, Optional
 from .adapters.process_adapter import ProcessAdapter
 from .capabilities import CapabilityRegistry
 from .config import Config, load_config
-from .ports import PortManager
+from .ports import PortManager, TERMINAL_STATUSES
 from .state import AgentState, AgentStatus, StateManager
 from .worktree import WorktreeManager
 
@@ -19,6 +19,10 @@ class DiagnosticCheck:
     passed: bool
     message: str
     details: Optional[str] = None
+    #: Whether `repair` can actually resolve this. A check that reports a problem only a
+    #: human can decide on must not tell the operator to run a command that will report
+    #: success and change nothing — that loop is what made the previous doctor useless.
+    repairable: bool = True
 
 
 @dataclass
@@ -32,6 +36,10 @@ class DoctorReport:
     @property
     def problem_count(self) -> int:
         return sum(1 for c in self.checks if not c.passed)
+
+    @property
+    def has_repairable_problems(self) -> bool:
+        return any(not c.passed and c.repairable for c in self.checks)
 
 
 class Doctor:
@@ -92,8 +100,13 @@ class Doctor:
         agents = self.state.list_agents()
         git_worktrees = {wt.path.resolve(): wt for wt in self.worktree_mgr.list_worktrees()}
 
+        # Only live agents are expected to have a worktree. A STOPPED or FAILED agent
+        # whose directory is gone is a finished agent, not a fault; reporting it as one
+        # left `doctor` permanently red with nothing anyone could do about it.
+        live_agents = [a for a in agents if a.status not in TERMINAL_STATUSES]
+
         wt_problems = []
-        for a in agents:
+        for a in live_agents:
             wt_path = Path(a.worktree_path).resolve()
             if not wt_path.exists():
                 wt_problems.append(f"Agent '{a.id}' worktree missing on disk: {wt_path}")
@@ -105,7 +118,7 @@ class Doctor:
                 DiagnosticCheck(
                     name="Worktrees",
                     passed=True,
-                    message=f"All {len(agents)} agent worktrees are intact.",
+                    message=f"All {len(live_agents)} active agent worktrees are intact.",
                 )
             )
         else:
@@ -115,6 +128,68 @@ class Doctor:
                     passed=False,
                     message=f"{len(wt_problems)} worktree issue(s) detected.",
                     details="\n".join(wt_problems),
+                )
+            )
+
+        # 3b. Directories under the worktree root that no agent claims.
+        #
+        # These are invisible to every other check precisely because nothing in state
+        # names them, and a leftover directory blocks the next spawn that resolves to the
+        # same path. Reported, never deleted: it may hold uncommitted work.
+        orphan_dirs = self.orphan_worktree_dirs(cfg, agents)
+        if not orphan_dirs:
+            report.checks.append(
+                DiagnosticCheck(
+                    name="Worktree directory",
+                    passed=True,
+                    message="No unclaimed directories under the worktree root.",
+                )
+            )
+        else:
+            details = [
+                f"{d} belongs to no agent. It may hold uncommitted work, so lanekeeper "
+                f"will not delete it — review it and remove it yourself."
+                for d in orphan_dirs
+            ]
+            report.checks.append(
+                DiagnosticCheck(
+                    name="Worktree directory",
+                    passed=False,
+                    message=f"{len(orphan_dirs)} unclaimed directory/directories under the worktree root.",
+                    details="\n".join(details),
+                    repairable=False,
+                )
+            )
+
+        # 3c. Agents whose cleanup could not finish.
+        #
+        # Reported on its own rather than folded into the port or worktree checks, because
+        # the resolution is neither of theirs: something outside lanekeeper is holding a
+        # file open, and only the operator can stop it.
+        unfinished = [a for a in agents if a.metadata.get("cleanup_failed")]
+        if not unfinished:
+            report.checks.append(
+                DiagnosticCheck(
+                    name="Cleanup", passed=True, message="No agent has an unfinished cleanup.",
+                )
+            )
+        else:
+            details = []
+            for a in unfinished:
+                bound = sorted(p for p in a.ports.values() if PortManager.is_port_in_use(p))
+                note = f" Port(s) {', '.join(str(p) for p in bound)} are still being served." if bound else ""
+                details.append(
+                    f"Agent '{a.id}' could not be cleaned up: {a.metadata['cleanup_failed']}."
+                    f"{note} Its worktree and ports were kept. Stop whatever is running in "
+                    f"{a.worktree_path}, then run 'lanekeeper cleanup {a.id} --force' again."
+                )
+            report.checks.append(
+                DiagnosticCheck(
+                    name="Cleanup",
+                    passed=False,
+                    message=f"{len(unfinished)} agent(s) have an unfinished cleanup.",
+                    details="\n".join(details),
+                    repairable=False,
                 )
             )
 
@@ -214,13 +289,38 @@ class Doctor:
 
         return report
 
+    def orphan_worktree_dirs(self, cfg: Config, agents: List[AgentState]) -> List[Path]:
+        """Directories under the worktree root that no agent in state claims."""
+        root = (self.root_dir / cfg.worktree_dir)
+        if not root.is_dir():
+            return []
+        claimed = {Path(a.worktree_path).resolve() for a in agents}
+        try:
+            children = sorted(p for p in root.iterdir() if p.is_dir())
+        except OSError:
+            return []
+        return [p for p in children if p.resolve() not in claimed]
+
     def repair(self, agent_id_or_name: Optional[str] = None) -> List[str]:
+        """Brings state back in line with the machine, and converges.
+
+        The previous version reported success while leaving `doctor` red, and in one case
+        made things worse: marking a dead agent FAILED turned its live port reservations
+        into orphans, which step 3 then declined to release because it only considered
+        agents missing from state entirely. `doctor` said "run repair", repair said
+        "complete", and nothing ever changed. Every state this pass can create, it now
+        also resolves — so a second run is a no-op and the only problems `doctor` still
+        reports afterwards are the ones it explicitly marks as not repairable.
+        """
         actions_taken = []
         agents = self.state.list_agents()
 
-        target_agents = [
-            a for a in agents if (agent_id_or_name is None or a.id == agent_id_or_name or a.name == agent_id_or_name)
-        ]
+        def targeted(agent: AgentState) -> bool:
+            return (agent_id_or_name is None
+                    or agent.id == agent_id_or_name
+                    or agent.name == agent_id_or_name)
+
+        target_agents = [a for a in agents if targeted(a)]
 
         # 1. Fix dead process states
         for a in target_agents:
@@ -231,17 +331,50 @@ class Doctor:
                     self.state.save_agent(a)
                     actions_taken.append(f"Updated agent '{a.id}' status to FAILED (process had died).")
 
-        # 2. Prune Git worktrees (repository-mutating: serialise with spawn/cleanup)
+        # 2. Reconcile agents whose worktree is gone. A live agent with no working
+        # directory cannot do anything; leaving it RUNNING kept doctor red forever.
+        for a in target_agents:
+            if a.status in TERMINAL_STATUSES or a.metadata.get("cleanup_failed"):
+                continue
+            if not Path(a.worktree_path).exists():
+                a.status = AgentStatus.FAILED.value
+                a.pid = None
+                self.state.save_agent(a)
+                actions_taken.append(
+                    f"Updated agent '{a.id}' status to FAILED (worktree no longer on disk).")
+
+        # 3. Prune Git worktrees (repository-mutating: serialise with spawn/cleanup)
         with self.state.git_lock():
             self.worktree_mgr.prune()
         actions_taken.append("Pruned stale Git worktree registrations.")
 
-        # 3. Clean orphaned port records
-        allocated_ports = self.state.get_allocated_ports()
-        all_agent_ids = {a.id for a in self.state.list_agents()}
-        for port_str, assigned_agent in list(allocated_ports.items()):
-            if assigned_agent not in all_agent_ids:
-                self.state.release_ports_for_agent(assigned_agent)
-                actions_taken.append(f"Released orphaned port {port_str} (belonged to unknown agent '{assigned_agent}').")
+        # 4. Release every reservation no live agent is entitled to: ports belonging to an
+        # agent that no longer exists, and ports still held by one that has finished.
+        # These are the same class of leak and must be cleared in the same pass that can
+        # create them, or repair cannot converge.
+        remaining = {a.id: a for a in self.state.list_agents()}
+        for port_str, assigned_agent in sorted(self.state.get_allocated_ports().items()):
+            agent = remaining.get(assigned_agent)
+            if agent is None:
+                released = self.state.release_ports_for_agent(assigned_agent)
+                if released:
+                    actions_taken.append(
+                        f"Released port(s) {', '.join(str(p) for p in sorted(released))} "
+                        f"(belonged to unknown agent '{assigned_agent}').")
+            elif agent.metadata.get("cleanup_failed"):
+                # Deliberately retained; see cmd_cleanup. Handing this port back while its
+                # worktree still exists is the exact leak the retention prevents.
+                continue
+            elif agent.status in TERMINAL_STATUSES and targeted(agent):
+                released = self.state.release_ports_for_agent(assigned_agent)
+                if released:
+                    # Clear the agent's own record too. The ledger and the agent must
+                    # agree, or the next audit reports the difference as a conflict —
+                    # trading one permanent complaint for another.
+                    agent.ports = {}
+                    self.state.save_agent(agent)
+                    actions_taken.append(
+                        f"Released port(s) {', '.join(str(p) for p in sorted(released))} "
+                        f"held by {agent.status.lower()} agent '{assigned_agent}'.")
 
         return actions_taken

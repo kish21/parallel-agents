@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -27,6 +28,7 @@ from .capabilities import (
 from .config import Config, UnknownLaneError, load_config, save_config
 from .doctor import Doctor
 from . import paths
+from .frameworks import default_url_templates
 from .layout import detect_layout, measure_coverage
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
@@ -60,6 +62,11 @@ def cmd_init(args: argparse.Namespace) -> int:
         detection = detect_layout(root)
         if detection.is_meaningful:
             cfg.lanes = detection.lanes
+
+    # Write the URL variables under the prefixes this repository's frontends can actually
+    # read. Without them the generated .env carries ports the browser bundle cannot see,
+    # and the frontend silently falls back to a compiled-in default server.
+    cfg.environment.url_templates = default_url_templates(root)
 
     save_config(cfg, root)
 
@@ -95,6 +102,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         print("\n⚠️  Only one lane was found, so there is nothing to run in parallel.")
         print("   Parallel agents scale with the number of *separable* lanes, not with the")
         print("   number of agents. Split the codebase further, or run a single agent.")
+    url_vars = sorted(cfg.environment.url_templates)
+    print(f"🔌 Service URLs written into each agent's .env: {', '.join(url_vars)}")
     print(f"🎫 Capability cards written for {len(written_cards)} seats: "
           + ", ".join(c.stem for c in written_cards))
     if gitignore_updated:
@@ -120,9 +129,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if report.is_healthy:
         print("✅ Environment is clean and ready for parallel execution.")
         return 0
+
+    # Only offer `repair` when it can actually change something. Pointing at a command
+    # that reports success and leaves the same problems in place is worse than saying
+    # nothing: it reads as a broken tool rather than as a decision the operator must make.
+    print(f"⚠️ {report.problem_count} problem(s) detected.")
+    if report.has_repairable_problems:
+        print("   Run 'lanekeeper repair' to fix the repairable ones.")
     else:
-        print(f"⚠️ {report.problem_count} problem(s) detected. Run 'lanekeeper repair' to fix.")
-        return 1
+        print("   None can be fixed automatically — see the details above for what to do.")
+    return 1
 
 
 def cmd_repair(args: argparse.Namespace) -> int:
@@ -302,6 +318,15 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     # index, so it must be serialised — but only against other git operations, not against
     # readers of the state file.
     try:
+        # A directory already sitting at the target path means an earlier worktree was
+        # never fully removed. `git worktree add` would fail deep inside git with a
+        # message that says nothing about what to do, so name the cause here.
+        target = target_path_for(root, config, agent_id)
+        if target.exists():
+            raise RuntimeError(
+                f"{target} already exists. A previous agent's worktree was not fully "
+                f"removed; delete the directory, then spawn again."
+            )
         print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
         with state_mgr.git_lock():
             resolved_path = worktree_mgr.create_worktree(target_path_for(root, config, agent_id), branch_name)
@@ -543,16 +568,61 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     # 1. Stop process
     adapter.stop(agent)
 
-    # 2. Release ports
-    released = state_mgr.release_ports_for_agent(agent.id)
-
-    # 3. Remove worktree (repository-mutating: same lock as creation)
+    # 2. Remove the worktree FIRST, and treat failure as failure.
+    #
+    # The ordering is the whole point. Releasing ports and deleting the state record
+    # before the directory is actually gone produced the worst outcome available: the
+    # leftover directory was no longer named by anything in state, so `doctor` reported a
+    # clean environment, `repair` had nothing to act on, and the next `spawn` collided
+    # with it. Removal is the step that can fail, so nothing else happens until it has
+    # demonstrably succeeded.
+    removal_error: Optional[str] = None
     if worktree_path.exists():
+        registered = {wt.path.resolve() for wt in worktree_mgr.list_worktrees()}
         try:
             with state_mgr.git_lock():
-                worktree_mgr.remove_worktree(worktree_path, force=args.force)
+                if worktree_path.resolve() in registered:
+                    worktree_mgr.remove_worktree(worktree_path, force=args.force)
+                else:
+                    # The directory outlived its registration — `git worktree prune` drops
+                    # the record as soon as the path is unreachable, and a failed earlier
+                    # cleanup leaves exactly that. `git worktree remove` refuses to touch
+                    # it ("is not a working tree"), so removing the directory is the only
+                    # way out; without this, a retried cleanup failed forever on a
+                    # directory git had already disowned.
+                    shutil.rmtree(worktree_path)
+                    worktree_mgr.prune()
         except Exception as e:
-            print(f"⚠️ Warning removing worktree: {e}")
+            removal_error = str(e)
+        if removal_error is None and worktree_path.exists():
+            # `git worktree remove` can report success while leaving the directory behind
+            # if a file inside it is still open. Trust the filesystem, not the exit code.
+            removal_error = "git reported success but the directory is still on disk"
+
+    if removal_error is not None:
+        # Recorded explicitly rather than by overloading `status`. The distinction that
+        # matters to every later command is "this agent's resources were deliberately
+        # kept back", which no lifecycle status expresses: a STOPPED agent's reservations
+        # are normally stale and safe to release, and these are neither.
+        agent.metadata["cleanup_failed"] = removal_error
+        state_mgr.save_agent(agent)
+        print(f"❌ Cleanup failed for '{agent.name}' ({agent.id}): could not remove the worktree.",
+              file=sys.stderr)
+        print(f"   {removal_error}", file=sys.stderr)
+        print(f"   Directory: {worktree_path}", file=sys.stderr)
+        print("   Its ports and state record were kept, so 'lanekeeper doctor' can still see it.",
+              file=sys.stderr)
+        print("   Usually a dev server started inside the worktree still holds a file open;",
+              file=sys.stderr)
+        print("   stop it and run cleanup again.", file=sys.stderr)
+        return 1
+
+    # 3. Release ports, and say so when one is still being served. A reservation can be
+    # withdrawn from the ledger, but a process nobody recorded a PID for cannot be, and
+    # silently handing that port back to the pool is how an agent ends up talking to a
+    # server it did not start.
+    still_bound = [p for p in agent.ports.values() if PortManager.is_port_in_use(p)]
+    released = state_mgr.release_ports_for_agent(agent.id)
 
     # 4. Remove state record
     state_mgr.remove_agent(agent.id)
@@ -560,6 +630,11 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     print(f"🧹 Successfully cleaned up agent '{agent.name}' ({agent.id}).")
     if released:
         print(f"   Released ports: {', '.join(str(p) for p in released)}")
+    if still_bound:
+        ports = ", ".join(str(p) for p in sorted(still_bound))
+        print(f"⚠️  Port(s) {ports} are still bound by a live process.")
+        print("   Lanekeeper did not start it (no PID was recorded) and cannot stop it.")
+        print("   Stop it yourself, or the next agent allocated this port will skip it.")
     return 0
 
 

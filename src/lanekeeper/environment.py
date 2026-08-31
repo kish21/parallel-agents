@@ -14,6 +14,33 @@ from .state import AgentState
 # POSIX single-quoted before it is written.
 _WHITESPACE_RUN = re.compile(r"\s+")
 _INVALID_KEY_CHARS = re.compile(r"[^A-Za-z0-9_]")
+_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+class UnresolvedTemplateError(ValueError):
+    """Raised when a URL template names a value this agent does not have."""
+
+    def __init__(self, name: str, template: str, missing: str):
+        self.name = name
+        self.template = template
+        self.missing = missing
+        super().__init__(
+            f"template for '{name}' references ${{{missing}}}, which this agent has no value for"
+        )
+
+
+def expand_template(name: str, template: str, values: Dict[str, str]) -> str:
+    """Expands ``${NAME}`` placeholders against an agent's own generated values.
+
+    Fails closed. A URL that is only partly expanded — ``http://127.0.0.1:${BACKEND_PORT}``
+    written out literally — is worse than no variable at all: the frontend would accept it
+    and fail at request time, far from the cause. A template naming a value the agent does
+    not have is therefore dropped, not emitted.
+    """
+    missing = [m.group(1) for m in _PLACEHOLDER.finditer(template) if m.group(1) not in values]
+    if missing:
+        raise UnresolvedTemplateError(name, template, missing[0])
+    return _PLACEHOLDER.sub(lambda m: values[m.group(1)], template)
 
 
 def shell_quote(value: str) -> str:
@@ -73,6 +100,21 @@ class EnvironmentManager:
             db_name = self.config.database.name_template.replace("${AGENT_ID}", safe_id)
             env_vars["DATABASE_NAME"] = db_name
             env_vars["DB_NAME"] = db_name
+
+        # Service URLs. Ports alone do not connect a frontend to a backend: a browser
+        # build tool exposes only its own prefixed variables to client code, so an
+        # unprefixed API_PORT is invisible to the bundle and the frontend falls back to
+        # whatever default is compiled into its source — usually another agent's server,
+        # or a stranger's. The prefixes to write are chosen at `init` from the
+        # repository's own dependencies and live in config; see `lanekeeper.frameworks`.
+        env_vars["HOST"] = self.config.environment.host
+        for name, template in sorted(self.config.environment.url_templates.items()):
+            try:
+                env_vars[sanitize_env_key(name)] = expand_template(name, template, env_vars)
+            except UnresolvedTemplateError:
+                # The project declares no such port category. Emitting a half-expanded
+                # URL would be worse than omitting the variable.
+                continue
 
         return env_vars
 

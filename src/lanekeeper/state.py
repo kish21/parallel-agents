@@ -55,6 +55,7 @@ from . import paths
 
 AGENTS_FILENAME = "agents.json"
 PORTS_FILENAME = "ports.json"
+COUNTER_FILENAME = "counter.json"
 
 
 class StateManager:
@@ -63,6 +64,7 @@ class StateManager:
         self.state_dir = paths.state_dir(self.root_dir)
         self.agents_file = self.state_dir / AGENTS_FILENAME
         self.ports_file = self.state_dir / PORTS_FILENAME
+        self.counter_file = self.state_dir / COUNTER_FILENAME
         self._ensure_storage()
 
     def lock(self) -> StateLock:
@@ -133,14 +135,39 @@ class StateManager:
             return False
 
     def allocate_next_agent_id(self) -> str:
-        """Atomically finds and reserves the next sequential agent ID under the state lock."""
+        """Atomically reserves the next agent ID under the state lock.
+
+        Monotonic: an ID is never reused, even after the agent that held it is removed
+        from state. Reuse looked harmless while every id was a dictionary key, but an
+        agent id also names a directory. When a `cleanup` failed to delete a worktree —
+        a running dev server holding a file open is enough on Windows — and removed the
+        state record anyway, the next spawn drew the same id, resolved the same path, and
+        `git worktree add` failed on a directory that already existed. Nothing in state
+        referred to that directory any more, so `doctor` could not see it and `repair`
+        could not clear it: spawning stayed broken until someone deleted it by hand.
+
+        The high-water mark is persisted, and reconciled against the ids currently in
+        state on every call, so a missing or truncated counter file can only ever cause
+        the sequence to resume — never to go backwards.
+        """
         with self.lock():
-            data = self._read_json(self.agents_file)
-            existing_ids = set(data.keys())
-            idx = 1
-            while f"agent-{idx:03d}" in existing_ids:
-                idx += 1
-            return f"agent-{idx:03d}"
+            agents = self._read_json(self.agents_file)
+            counter = self._read_json(self.counter_file)
+
+            try:
+                last_issued = int(counter.get("last_agent_index", 0))
+            except (TypeError, ValueError):
+                last_issued = 0
+
+            highest_in_state = 0
+            for agent_id in agents:
+                _, _, suffix = str(agent_id).rpartition("-")
+                if suffix.isdigit():
+                    highest_in_state = max(highest_in_state, int(suffix))
+
+            next_index = max(last_issued, highest_in_state) + 1
+            self._write_json(self.counter_file, {"last_agent_index": next_index})
+            return f"agent-{next_index:03d}"
 
     def get_allocated_ports(self) -> Dict[str, str]:
         """Returns map of port_number (str) -> agent_id."""

@@ -118,6 +118,14 @@ class PortManager:
                         f"Port {port} allocated to non-existent agent '{agent_id}'"
                         + (" and is still bound by a live process." if bound else ".")
                     )
+                elif agent.metadata.get("cleanup_failed"):
+                    # Held back on purpose: this agent's worktree could not be removed, so
+                    # its reservation is the opposite of stale. Reporting it as an orphan
+                    # would invite a repair that hands a port back while it is still being
+                    # served. The situation is reported once, by the doctor's cleanup check.
+                    active_ports.append(
+                        {"port": port, "agent_id": agent_id, "status": agent.status, "bound": bound}
+                    )
                 elif agent.status in TERMINAL_STATUSES:
                     detail = (
                         f"Port {port} still reserved by {agent.status.lower()} agent '{agent_id}'"
@@ -134,6 +142,11 @@ class PortManager:
             # the ledger. Drift here means the ledger could re-issue a port that an agent
             # is already serving on.
             for agent in agents.values():
+                # A finished agent's recorded ports are history, not a claim. Once its
+                # reservations are released the two records legitimately differ, and
+                # reporting that as drift would make the release itself un-auditable.
+                if agent.status in TERMINAL_STATUSES:
+                    continue
                 for category, port in agent.ports.items():
                     ledger_owner = allocated.get(str(port))
                     if ledger_owner is None:
