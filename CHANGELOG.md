@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.5.0] - 2026-08-31
+
+### Changed
+
+- **The distribution is now published as `lanekeeper`.** `parallel-agents` was already
+  registered on PyPI by an unrelated project, so `pip install parallel-agents` fetched
+  someone else's package and this one could not be installed by name at all. The
+  repository, the import package (`parallel_agents`), and the existing command are all
+  unchanged.
+- **`lanekeeper` is the primary command**, with `parallel-agents` retained as an alias
+  pointing at the same entry point, so existing scripts, documentation and habits keep
+  working.
+- Added `[project.urls]` so the PyPI page links back to the repository and changelog.
+
 ## [v0.4.0] - 2026-08-31
 
 Usability release, from walking the tool as a first-time user rather than reviewing the
