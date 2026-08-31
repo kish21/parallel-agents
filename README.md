@@ -99,6 +99,19 @@ pip install -e .
 ```
 
 ### 2. Initialize the Repository
+
+`init` reads your repository and generates lanes that match its actual structure, then
+reports how much of the tree they cover:
+
+```
+$ parallel-agents init
+🧭 Detected 3 lanes from the repository layout: backend, frontend, platform
+   Coverage: 100% of 412 tracked files fall inside a lane.
+```
+
+If coverage is low it says so, rather than letting you discover it when validation reports
+legitimate work as out-of-lane. Use `--generic` to keep the starter lanes instead.
+
 From your project root:
 ```bash
 parallel-agents init
@@ -505,7 +518,7 @@ python -m unittest discover tests
 ```
 ....................................
 ----------------------------------------------------------------------
-Ran 108 tests in 13.2s
+Ran 139 tests in 16.3s
 
 OK
 ```

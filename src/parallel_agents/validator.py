@@ -87,6 +87,12 @@ class Validator:
                 return pattern
         return None
 
+    def _any_lane_allows(self, path: str) -> bool:
+        return any(
+            self._matches_any(path, lane.allow)
+            for lane in self.config.lanes.values() if lane.allow
+        )
+
     def _run_quality_commands(self) -> List[QualityCommandResult]:
         results: List[QualityCommandResult] = []
         for cmd in self.config.quality.commands:
@@ -202,6 +208,13 @@ class Validator:
         changed_files = self.worktree_mgr.get_changed_files(worktree_path)
         lane_result = LaneEngine.validate_files(changed_files, lane_config)
 
+        # A file that no declared lane would accept is a symptom of a lane configuration
+        # that does not describe this repository — not of the agent doing something wrong.
+        # Blaming the file sends the user hunting through their diff instead of their config.
+        orphaned = [
+            v.filepath for v in lane_result.violations
+            if v.reason == "not_allowed" and not self._any_lane_allows(v.filepath)
+        ]
         for v in lane_result.violations:
             if v.reason == "denied":
                 errors.append(
@@ -209,6 +222,13 @@ class Validator:
             else:
                 errors.append(
                     f"Out-of-lane file modified (not in allowed paths for lane '{agent.lane}'): {v.filepath}")
+        if orphaned:
+            errors.append(
+                f"No declared lane allows {len(orphaned)} of these paths (e.g. {orphaned[0]}). "
+                f"Your lanes may not match this project's layout — check the 'lanes' section of "
+                f".parallel-agents/config.yaml, or re-run 'parallel-agents init --force' to "
+                f"regenerate them from the repository's actual structure."
+            )
 
         # 2. Quality commands.
         quality_results = self._run_quality_commands()
