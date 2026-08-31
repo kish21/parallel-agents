@@ -17,6 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
+from . import __version__
 from .adapters.process_adapter import ProcessAdapter
 from .capabilities import (
     CapabilityRegistry,
@@ -708,6 +709,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lanekeeper",
         description="Lanekeeper — Mechanical Safety & Coordination Tool for AI Coding Agents",
+    )
+    # The first question asked of any installed CLI is which build is on the machine.
+    # It reports the version of the distribution actually installed, not a literal.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"lanekeeper {__version__}",
+        help="Show the installed lanekeeper version and exit",
     )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
