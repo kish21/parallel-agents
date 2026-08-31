@@ -1,11 +1,11 @@
-# Parallel Agents ⚡
+# Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](CHANGELOG.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run multiple AI coding agents safely in the same repository.**
 
-Parallel Agents gives each coding agent its own Git worktree, branch, ports, environment, and code boundaries, so agents can work at the same time without accidentally interfering with each other.
+Lanekeeper gives each coding agent its own Git worktree, branch, ports, environment, and code boundaries, so agents can work at the same time without accidentally interfering with each other.
 
 ```
                     Your Repository
@@ -30,7 +30,7 @@ Parallel Agents gives each coding agent its own Git worktree, branch, ports, env
 
 ---
 
-## Why Parallel Agents?
+## Why Lanekeeper?
 
 AI coding agents are powerful, but running several agents in the same repository creates real operational problems:
 
@@ -41,7 +41,7 @@ AI coding agents are powerful, but running several agents in the same repository
 * **Out-of-Scope Changes**: An agent can modify central configs, auth, or infrastructure outside its assigned task.
 * **Resource Leaks**: Failed agents can leave behind orphaned processes, blocked ports, or stale git state.
 
-Parallel Agents adds a mechanical coordination and safety layer around your coding agents to prevent these problems.
+Lanekeeper adds a mechanical coordination and safety layer around your coding agents to prevent these problems.
 
 ---
 
@@ -112,7 +112,7 @@ lanekeeper spawn \
   --lane backend \
   --task "Implement user authentication"
 ```
-Parallel Agents provisions the isolated worktree, branch, `.env`, and dedicated ports automatically (and optionally starts an agent execution process when `--command` is supplied).
+Lanekeeper provisions the isolated worktree, branch, `.env`, and dedicated ports automatically (and optionally starts an agent execution process when `--command` is supplied).
 
 ### 4. Create Another Agent
 ```bash
@@ -267,7 +267,7 @@ lanekeeper cleanup backend-1
 
 ## Mechanical Validation
 
-Never rely on an AI agent's word that its work is complete. Parallel Agents independently validates:
+Never rely on an AI agent's word that its work is complete. Lanekeeper independently validates:
 
 ```bash
 $ lanekeeper validate backend-1
@@ -347,10 +347,10 @@ agent-003 → app_agent_003
 
 ## Agent Providers & Adapters
 
-Parallel Agents is provider-independent. It uses a pluggable `AgentAdapter` abstraction:
+Lanekeeper is provider-independent. It uses a pluggable `AgentAdapter` abstraction:
 
 ```
-              Parallel Agents
+              Lanekeeper
                     │
               Agent Adapter
                     │
@@ -392,7 +392,7 @@ The orchestration layer handles isolation, ports, and validation; the adapter ha
 
 ---
 
-## 🚫 What Parallel Agents Is Not
+## 🚫 What Lanekeeper Is Not
 
 * ❌ Not an autonomous AI software company.
 * ❌ Not an AI project manager.
@@ -405,7 +405,7 @@ It is a **lightweight coordination and safety layer** for parallel AI coding age
 
 ## 🧪 Automated Testing & Reliability Benchmarks
 
-Parallel Agents includes a **tracked 36-test unit, integration, concurrency stress, and failure recovery suite** and an automated reproducibility benchmark runner.
+Lanekeeper includes a **tracked 36-test unit, integration, concurrency stress, and failure recovery suite** and an automated reproducibility benchmark runner.
 
 ### 1. Run the Full Test Suite
 ```bash
@@ -454,24 +454,24 @@ Reproducibility benchmark: 5 cycles / 15 agents completed with 0 observed worktr
 
 | Document | Description |
 | :--- | :--- |
-| **[🎬 End-to-End Walkthrough](EXAMPLES.md)** | Step-by-step lifecycle of Ticket #102 from assignment to merge. |
-| **[01. Working Agreement](01-working-agreement.md)** | Definition-of-Done, path boundary contracts, and merge discipline. |
-| **[02. Conflict Management](02-conflict-management.md)** | Worktree deep-dive, port tables, and Disaster Recovery Runbook. |
-| **[03. Orchestration](03-orchestration.md)** | Capability cards, scaling 2→4→6 seats, and ROI metrics. |
-| **[04. Agent Setup](04-agent-setup.md)** | Prompts for Senior/Junior agents and token cost hygiene. |
-| **[05. GitHub Mechanics](05-github-mechanics.md)** | Board custom fields, disjoint milestones, and single-account routing. |
-| **[06. Free-Tier Operations](06-free-tier-ops.md)** | CI minute optimization, public vs private repo trade-offs, and verified mirrors. |
+| **[🎬 End-to-End Walkthrough](https://github.com/kish21/parallel-agents/blob/main/EXAMPLES.md)** | Step-by-step lifecycle of Ticket #102 from assignment to merge. |
+| **[01. Working Agreement](https://github.com/kish21/parallel-agents/blob/main/01-working-agreement.md)** | Definition-of-Done, path boundary contracts, and merge discipline. |
+| **[02. Conflict Management](https://github.com/kish21/parallel-agents/blob/main/02-conflict-management.md)** | Worktree deep-dive, port tables, and Disaster Recovery Runbook. |
+| **[03. Orchestration](https://github.com/kish21/parallel-agents/blob/main/03-orchestration.md)** | Capability cards, scaling 2→4→6 seats, and ROI metrics. |
+| **[04. Agent Setup](https://github.com/kish21/parallel-agents/blob/main/04-agent-setup.md)** | Prompts for Senior/Junior agents and token cost hygiene. |
+| **[05. GitHub Mechanics](https://github.com/kish21/parallel-agents/blob/main/05-github-mechanics.md)** | Board custom fields, disjoint milestones, and single-account routing. |
+| **[06. Free-Tier Operations](https://github.com/kish21/parallel-agents/blob/main/06-free-tier-ops.md)** | CI minute optimization, public vs private repo trade-offs, and verified mirrors. |
 
 ---
 
 ## 🤝 Community & Contributing
 
 Contributions are welcome! See our community guidelines:
-* **[Contributing Guide](CONTRIBUTING.md)**
-* **[Security Policy](SECURITY.md)**
-* **[Code of Conduct](CODE_OF_CONDUCT.md)**
+* **[Contributing Guide](https://github.com/kish21/parallel-agents/blob/main/CONTRIBUTING.md)**
+* **[Security Policy](https://github.com/kish21/parallel-agents/blob/main/SECURITY.md)**
+* **[Code of Conduct](https://github.com/kish21/parallel-agents/blob/main/CODE_OF_CONDUCT.md)**
 
 ---
 
 ## License
-[MIT](LICENSE)
+[MIT](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
