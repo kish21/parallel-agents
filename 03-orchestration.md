@@ -44,7 +44,7 @@ Never assume all AI agent harnesses are equal. Treat capabilities as an explicit
 ```
 GitHub Project Board              Local Checkout (.lane)              Active AI Harness
 ┌──────────────────┐             ┌────────────────────┐             ┌──────────────────┐
-│ Ticket #808      │             │ Path: worktree/sr1 │             │ Vendor Model A   │
+│ Ticket #101      │             │ Path: worktree/sr1 │             │ Vendor Model A   │
 │ Seat: SR1        ├────────────►│ SEAT=SR1           ├────────────►│ (Fills SR1 Slot) │
 │ Lane: service    │             └────────────────────┘             └──────────────────┘
 └──────────────────┘
