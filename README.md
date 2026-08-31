@@ -459,10 +459,13 @@ Parallel Agents is provider-independent. It uses a pluggable `AgentAdapter` abst
                     │
        ┌────────────┼────────────┐
        ▼            ▼            ▼
-   Claude CLI    Cursor / IDE   Generic CLI
+   CLI harness   IDE session   Custom adapter
 ```
 
-The orchestration layer handles isolation, ports, and validation; the adapter handles execution.
+The orchestration layer handles isolation, ports, and validation; the adapter handles
+execution. No vendor is named anywhere in the tooling or the configuration schema: which
+harness fills a seat is recorded in that seat's capability card (`vendor_harness`), so
+swapping vendors edits one field and changes nothing else.
 
 ---
 
