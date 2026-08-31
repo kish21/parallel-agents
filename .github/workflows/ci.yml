@@ -1,13 +1,24 @@
 name: CI
 
 on:
+  # Every branch, not just main. Feature branches are where agents actually work, so
+  # leaving them unchecked defeats the point of having a gate.
+  #
+  # 06-free-tier-ops.md argues for restricting triggers to conserve the Actions
+  # allowance, but that section applies to *private* repositories. This repository is
+  # public, where the same document records minutes as unmetered — so the restriction
+  # bought nothing here except unverified branches.
+  #
+  # A same-repo branch with an open PR runs twice (push + pull_request). That is the
+  # accepted cost of keeping the pull_request trigger, which is what covers PRs from
+  # forks; superseded runs are cancelled below.
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
