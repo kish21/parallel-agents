@@ -19,6 +19,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from .adapters.process_adapter import ProcessAdapter
 from .config import Config, load_config, save_config
 from .doctor import Doctor
+from . import paths
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
 from .ports import PortManager
@@ -35,7 +36,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 1
 
     project_name = args.name or root.name
-    config_file = root / ".lanekeeper" / "config.yaml"
+    config_file = paths.config_path(root)
 
     if config_file.exists() and not args.force:
         print(f"ℹ️ Configuration already exists at {config_file}. Use --force to re-initialize.")
@@ -303,7 +304,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
     for f in changed_files:
         norm_f = LaneEngine.normalize_path(f)
-        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(p) for p in (".lanekeeper/", ".git/")):
+        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(prefix) for prefix in paths.ignored_prefixes()):
             continue
 
         violation = None

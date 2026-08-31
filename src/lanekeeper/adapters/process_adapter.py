@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 from .base import AgentAdapter
 from ..state import AgentState, AgentStatus
-
-LOGS_DIR = Path(".lanekeeper/logs")
+from .. import paths
 
 
 class ProcessAdapter(AgentAdapter):
@@ -19,7 +18,7 @@ class ProcessAdapter(AgentAdapter):
 
     def __init__(self, root_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path.cwd()
-        self.logs_dir = self.root_dir / LOGS_DIR
+        self.logs_dir = paths.logs_dir(self.root_dir)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_log_path(self, agent_id: str) -> Path:

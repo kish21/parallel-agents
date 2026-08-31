@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import yaml
 
+from . import paths
+
 
 @dataclass
 class LaneConfig:
@@ -44,7 +46,7 @@ class Config:
     version: int = 1
     project_name: str = "parallel-project"
     max_agents: int = 4
-    worktree_dir: str = ".lanekeeper/worktrees"
+    worktree_dir: str = field(default_factory=paths.default_worktree_dir)
     lanes: Dict[str, LaneConfig] = field(default_factory=dict)
     port_ranges: Dict[str, PortRange] = field(default_factory=dict)
     git: GitConfig = field(default_factory=GitConfig)
@@ -57,7 +59,7 @@ class Config:
             version=1,
             project_name=project_name,
             max_agents=4,
-            worktree_dir=".lanekeeper/worktrees",
+            worktree_dir=paths.default_worktree_dir(),
             lanes={
                 "backend": LaneConfig(
                     name="backend",
@@ -161,7 +163,7 @@ class Config:
             version=data.get("version", 1),
             project_name=project_data.get("name", "my-project"),
             max_agents=defaults_data.get("max_agents", 4),
-            worktree_dir=defaults_data.get("worktree_dir", ".lanekeeper/worktrees"),
+            worktree_dir=defaults_data.get("worktree_dir", paths.default_worktree_dir()),
             lanes=lanes,
             port_ranges=port_ranges,
             git=GitConfig(
@@ -176,9 +178,6 @@ class Config:
         )
 
 
-CONFIG_PATH = Path(".lanekeeper/config.yaml")
-
-
 def generate_default_config(project_name: str = "my-project") -> Config:
     """Helper to generate a standard default Config object."""
     return Config.default(project_name)
@@ -186,7 +185,7 @@ def generate_default_config(project_name: str = "my-project") -> Config:
 
 def load_config(root_dir: Optional[Path] = None) -> Config:
     root = root_dir or Path.cwd()
-    cfg_file = root / CONFIG_PATH
+    cfg_file = paths.config_path(root)
     if not cfg_file.exists():
         raise FileNotFoundError(
             f"No lanekeeper configuration found at {cfg_file}. Run 'lanekeeper init' first."
@@ -198,7 +197,7 @@ def load_config(root_dir: Optional[Path] = None) -> Config:
 
 def save_config(config: Config, root_dir: Optional[Path] = None) -> Path:
     root = root_dir or Path.cwd()
-    cfg_file = root / CONFIG_PATH
+    cfg_file = paths.config_path(root)
     cfg_file.parent.mkdir(parents=True, exist_ok=True)
     with open(cfg_file, "w", encoding="utf-8") as f:
         yaml.safe_dump(config.to_dict(), f, sort_keys=False, default_flow_style=False)

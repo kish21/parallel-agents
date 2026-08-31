@@ -105,6 +105,17 @@ lanekeeper init
 ```
 This creates the `.lanekeeper/` configuration and state directories.
 
+To keep lanekeeper's files somewhere else, set `LANEKEEPER_HOME` to a
+directory name relative to the repository root before running any command:
+
+```bash
+export LANEKEEPER_HOME=.agents
+```
+
+Everything lanekeeper writes — config, state, logs and the default worktree
+location — moves with it. Absolute paths and paths containing `..` are
+rejected, so the directory always stays inside the repository.
+
 ### 3. Create an Agent
 ```bash
 lanekeeper spawn \

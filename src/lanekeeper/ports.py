@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import socket
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from .config import Config, PortRange
 from .state import StateManager
 
