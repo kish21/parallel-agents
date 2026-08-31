@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.capabilities import (
+from lanekeeper.capabilities import (
     CapabilityCard,
     CapabilityCardError,
     CapabilityRegistry,
@@ -24,10 +24,10 @@ from parallel_agents.capabilities import (
     default_cards,
     save_card,
 )
-from parallel_agents.config import CapabilityGate, QualityCommand, generate_default_config, save_config
-from parallel_agents.state import AgentState, StateManager
-from parallel_agents.validator import Validator
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import CapabilityGate, QualityCommand, generate_default_config, save_config
+from lanekeeper.state import AgentState, StateManager
+from lanekeeper.validator import Validator
+from lanekeeper.worktree import WorktreeManager
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _cli_harness import output_of, run_cli  # noqa: E402
@@ -87,7 +87,7 @@ class TestRegistryFailsClosed(unittest.TestCase):
         self.assertTrue(CapabilityRegistry.load(self.tmp).is_empty)
 
     def test_malformed_json_is_an_error_not_a_silent_skip(self):
-        d = self.tmp / ".parallel-agents" / "capabilities"
+        d = self.tmp / ".lanekeeper" / "capabilities"
         d.mkdir(parents=True)
         (d / "SR1.json").write_text("{not json", encoding="utf-8")
         with self.assertRaises(CapabilityCardError):
@@ -240,11 +240,11 @@ class TestCliIntegration(unittest.TestCase):
         self.assertEqual(res.returncode, 0, output_of(res))
 
     def _worktree_of(self, agent_id):
-        agents = json.loads((self.tmp / ".parallel-agents/state/agents.json").read_text())
+        agents = json.loads((self.tmp / ".lanekeeper/state/agents.json").read_text())
         return Path(agents[agent_id]["worktree_path"])
 
     def test_init_writes_cards_for_every_standard_seat(self):
-        cards_dir = self.tmp / ".parallel-agents" / "capabilities"
+        cards_dir = self.tmp / ".lanekeeper" / "capabilities"
         self.assertTrue(cards_dir.is_dir())
         self.assertEqual({p.stem for p in cards_dir.glob("*.json")}, {"SR1", "SR2", "JR1", "JR2"})
 
@@ -253,7 +253,7 @@ class TestCliIntegration(unittest.TestCase):
                        "--task", "t"], self.tmp)
         self.assertEqual(res.returncode, 1, output_of(res))
         self.assertIn("Unknown seat", res.stderr)
-        agents = json.loads((self.tmp / ".parallel-agents/state/agents.json").read_text())
+        agents = json.loads((self.tmp / ".lanekeeper/state/agents.json").read_text())
         self.assertEqual(agents, {}, "a rejected spawn must provision nothing")
 
     def test_validate_blocks_a_gated_file_with_exit_code_2(self):
@@ -296,7 +296,7 @@ class TestCliIntegration(unittest.TestCase):
     def test_doctor_flags_an_agent_whose_seat_has_no_card(self):
         self.assertEqual(run_cli(["spawn", "--lane", "backend", "--seat", "JR1",
                                   "--name", "jr", "--task", "t"], self.tmp).returncode, 0)
-        (self.tmp / ".parallel-agents" / "capabilities" / "JR1.json").unlink()
+        (self.tmp / ".lanekeeper" / "capabilities" / "JR1.json").unlink()
         res = run_cli(["doctor"], self.tmp)
         self.assertEqual(res.returncode, 1, output_of(res))
         self.assertIn("Capability cards", res.stdout)

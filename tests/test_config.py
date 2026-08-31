@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import (
+from lanekeeper.config import (
     Config,
     LaneConfig,
     PortRange,

@@ -13,8 +13,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import Config
-from parallel_agents.layout import detect_layout, measure_coverage, tracked_files
+from lanekeeper.config import Config
+from lanekeeper.layout import detect_layout, measure_coverage, tracked_files
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _cli_harness import output_of, run_cli  # noqa: E402
@@ -161,7 +161,7 @@ class TestInitUsesDetection(unittest.TestCase):
         self.assertEqual(spawn.returncode, 0, output_of(spawn))
 
         import json
-        agents = json.loads((root / ".parallel-agents/state/agents.json").read_text())
+        agents = json.loads((root / ".lanekeeper/state/agents.json").read_text())
         wt = Path(agents["agent-001"]["worktree_path"])
         target = wt / "src" / "myapp" / "api.py"
         target.write_text(target.read_text(encoding="utf-8") + "\ndef new(): pass\n", encoding="utf-8")
@@ -181,7 +181,7 @@ class TestOutOfLaneErrorIsActionable(unittest.TestCase):
                                   "--name", "w1", "--task", "t"], root).returncode, 0)
 
         import json
-        agents = json.loads((root / ".parallel-agents/state/agents.json").read_text())
+        agents = json.loads((root / ".lanekeeper/state/agents.json").read_text())
         wt = Path(agents["agent-001"]["worktree_path"])
         target = wt / "src" / "myapp" / "api.py"
         target.write_text(target.read_text(encoding="utf-8") + "\nx = 1\n", encoding="utf-8")

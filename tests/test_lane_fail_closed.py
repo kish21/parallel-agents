@@ -17,10 +17,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import Config, UnknownLaneError, save_config
-from parallel_agents.state import AgentState, StateManager
-from parallel_agents.validator import Validator
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import Config, UnknownLaneError, save_config
+from lanekeeper.state import AgentState, StateManager
+from lanekeeper.validator import Validator
+from lanekeeper.worktree import WorktreeManager
 
 # Files a mis-laned agent must never be told are safe.
 DANGEROUS_FILES = [
@@ -133,9 +133,9 @@ class TestCliRejectsUndeclaredLane(unittest.TestCase):
         self.assertIn("backend", res.stderr)  # lists valid lanes
 
         # No worktree, no branch, no ledger entry may be left behind.
-        agents = json.loads((self.tmp / ".parallel-agents/state/agents.json").read_text())
+        agents = json.loads((self.tmp / ".lanekeeper/state/agents.json").read_text())
         self.assertEqual(agents, {})
-        ports = json.loads((self.tmp / ".parallel-agents/state/ports.json").read_text())
+        ports = json.loads((self.tmp / ".lanekeeper/state/ports.json").read_text())
         self.assertEqual(ports, {})
         branches = subprocess.run(
             ["git", "branch", "--list", "parallel/*"], cwd=self.tmp,
@@ -157,7 +157,7 @@ class TestCliRejectsUndeclaredLane(unittest.TestCase):
         cfg.lanes.pop("backend")
         save_config(cfg, self.tmp)
 
-        agents = json.loads((self.tmp / ".parallel-agents/state/agents.json").read_text())
+        agents = json.loads((self.tmp / ".lanekeeper/state/agents.json").read_text())
         wt = Path(agents["agent-001"]["worktree_path"])
         for rel in DANGEROUS_FILES:
             f = wt / rel

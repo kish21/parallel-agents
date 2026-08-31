@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import generate_default_config
-from parallel_agents.worktree import WorktreeManager
+from lanekeeper.config import generate_default_config
+from lanekeeper.worktree import WorktreeManager
 
 
 class TestWorktreeManager(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestWorktreeManager(unittest.TestCase):
 
     def test_create_and_remove_worktree(self):
         branch = self.wt_mgr.make_branch_name("agent-001", "Build API")
-        target_path = self.root / ".parallel-agents" / "worktrees" / "agent-001"
+        target_path = self.root / ".lanekeeper" / "worktrees" / "agent-001"
         wt_path = self.wt_mgr.create_worktree(target_path, branch)
         self.assertTrue(wt_path.exists())
         self.assertTrue((wt_path / ".git").exists())

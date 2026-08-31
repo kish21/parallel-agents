@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
+from . import paths
 
-CAPABILITIES_DIR = Path(".parallel-agents/capabilities")
 
 
 class CapabilityState(str, Enum):
@@ -156,7 +156,7 @@ class CapabilityRegistry:
     @classmethod
     def load(cls, root_dir: Optional[Path] = None) -> "CapabilityRegistry":
         root = root_dir or Path.cwd()
-        cards_dir = root / CAPABILITIES_DIR
+        cards_dir = paths.capabilities_dir(root)
         cards: Dict[str, CapabilityCard] = {}
         if not cards_dir.is_dir():
             return cls(cards)
@@ -173,7 +173,7 @@ class CapabilityRegistry:
 
 def save_card(card: CapabilityCard, root_dir: Optional[Path] = None) -> Path:
     root = root_dir or Path.cwd()
-    cards_dir = root / CAPABILITIES_DIR
+    cards_dir = paths.capabilities_dir(root)
     cards_dir.mkdir(parents=True, exist_ok=True)
     path = cards_dir / f"{card.seat}.json"
     path.write_text(json.dumps(card.to_dict(), indent=2) + "\n", encoding="utf-8")

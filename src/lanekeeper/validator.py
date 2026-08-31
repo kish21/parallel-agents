@@ -15,6 +15,7 @@ from .capabilities import (
 )
 from .config import Config, UnknownLaneError
 from .lanes import LaneEngine, LaneValidationResult
+from . import paths
 from .state import StateManager
 from .worktree import WorktreeManager
 
@@ -226,7 +227,7 @@ class Validator:
             errors.append(
                 f"No declared lane allows {len(orphaned)} of these paths (e.g. {orphaned[0]}). "
                 f"Your lanes may not match this project's layout — check the 'lanes' section of "
-                f".parallel-agents/config.yaml, or re-run 'parallel-agents init --force' to "
+                f"{paths.display_config_path()}, or re-run 'lanekeeper init --force' to "
                 f"regenerate them from the repository's actual structure."
             )
 

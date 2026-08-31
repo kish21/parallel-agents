@@ -19,9 +19,9 @@ from pathlib import Path
 SH = shutil.which("sh")
 requires_sh = unittest.skipIf(SH is None, "no POSIX shell available on this platform")
 
-from parallel_agents.config import Config
-from parallel_agents.environment import EnvironmentManager, sanitize_env_key, shell_quote
-from parallel_agents.state import AgentState
+from lanekeeper.config import Config
+from lanekeeper.environment import EnvironmentManager, sanitize_env_key, shell_quote
+from lanekeeper.state import AgentState
 
 HOSTILE_TASKS = [
     'add "quoted" support',

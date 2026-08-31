@@ -2,9 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import generate_default_config
-from parallel_agents.ports import PortError, PortManager
-from parallel_agents.state import StateManager
+from lanekeeper.config import generate_default_config
+from lanekeeper.ports import PortError, PortManager
+from lanekeeper.state import StateManager
 
 
 class TestPortManager(unittest.TestCase):
@@ -46,7 +46,7 @@ class TestPortManager(unittest.TestCase):
         self.assertEqual(ports_new["backend"], 8001)
 
     def test_audit_ports_clean_and_orphaned(self):
-        from parallel_agents.state import AgentState, AgentStatus
+        from lanekeeper.state import AgentState, AgentStatus
         # Allocate port for agent-001
         self.port_mgr.allocate_ports_for_agent("agent-001")
 

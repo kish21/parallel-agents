@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import List, Optional
 from .config import LaneConfig
+from . import paths
 
 
 @dataclass
@@ -126,7 +127,7 @@ class LaneEngine:
         violations: List[LaneViolation] = []
 
         # Built-in internal files to ignore
-        ignored_prefixes = (".parallel-agents/", ".git/")
+        ignored_prefixes = paths.ignored_prefixes()
         ignored_exact = (".env", ".lane", ".gitignore")
 
         for f in files:

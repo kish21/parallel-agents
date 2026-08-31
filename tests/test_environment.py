@@ -2,9 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import generate_default_config
-from parallel_agents.environment import EnvironmentManager
-from parallel_agents.state import AgentState
+from lanekeeper.config import generate_default_config
+from lanekeeper.environment import EnvironmentManager
+from lanekeeper.state import AgentState
 
 
 class TestEnvironmentManager(unittest.TestCase):

@@ -1,8 +1,8 @@
 import unittest
 from pathlib import Path
 
-from parallel_agents.config import LaneConfig
-from parallel_agents.lanes import LaneEngine
+from lanekeeper.config import LaneConfig
+from lanekeeper.lanes import LaneEngine
 
 
 class TestLaneEngine(unittest.TestCase):

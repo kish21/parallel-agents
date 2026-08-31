@@ -1,6 +1,6 @@
 # Security Policy 🛡️
 
-The **Parallel Agents** maintainers take the security of this framework, its automation tooling, and downstream agent workflows seriously.
+The **Lanekeeper** maintainers take the security of this framework, its automation tooling, and downstream agent workflows seriously.
 
 ---
 
@@ -23,7 +23,7 @@ If you discover a security vulnerability (such as a command injection in `bootst
 2. Report the vulnerability privately via **GitHub Security Advisory** on the repository:
    - Navigate to the repository's [Security Advisories tab](https://github.com/kish21/parallel-agents/security/advisories).
    - Click **"Report a vulnerability"**.
-3. Alternatively, email the maintainer at `kishorekv2@gmail.com` with the subject line `[SECURITY] Parallel Agents Vulnerability Report`.
+3. Alternatively, email the maintainer at `kishorekv2@gmail.com` with the subject line `[SECURITY] Lanekeeper Vulnerability Report`.
 
 Please include:
 * Description of the vulnerability and potential impact.

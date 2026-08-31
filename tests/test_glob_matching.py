@@ -9,8 +9,8 @@ capability gate written that way was inert.
 
 import unittest
 
-from parallel_agents.config import LaneConfig
-from parallel_agents.lanes import LaneEngine
+from lanekeeper.config import LaneConfig
+from lanekeeper.lanes import LaneEngine
 
 
 class TestMatchGlob(unittest.TestCase):
