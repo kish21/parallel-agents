@@ -180,31 +180,58 @@ class WorktreeManager:
         if not worktree_path.exists():
             return []
 
+        # Both queries use -z: NUL-separated output is never quoted or escaped, so paths
+        # containing spaces, quotes or non-ASCII characters survive intact.
+
         # 1. Committed diff against base branch
         diff_res = self._run_git(
-            ["diff", "--name-only", f"{base}...HEAD"],
+            ["diff", "--name-only", "-z", f"{base}...HEAD"],
             cwd=worktree_path,
             check=False,
         )
-        committed_files = [f.strip() for f in diff_res.stdout.splitlines() if f.strip()]
+        committed_files = [f for f in diff_res.stdout.split("\0") if f]
 
-        # 2. Uncommitted & untracked working tree changes (use -uall to list all individual files)
+        # 2. Uncommitted & untracked working-tree changes
         status_res = self._run_git(
-            ["status", "--porcelain", "-uall"],
+            ["status", "--porcelain", "-z", "-uall"],
             cwd=worktree_path,
             check=False,
         )
-        uncommitted_files = []
-        for line in status_res.stdout.splitlines():
-            line = line.strip()
-            if len(line) > 3:
-                filepath = line[3:].strip()
-                if " -> " in filepath:
-                    filepath = filepath.split(" -> ")[1].strip()
-                uncommitted_files.append(filepath)
+        uncommitted_files = self._parse_porcelain_z(status_res.stdout)
 
-        all_files = list(dict.fromkeys(committed_files + uncommitted_files))
-        return all_files
+        return list(dict.fromkeys(committed_files + uncommitted_files))
+
+    @staticmethod
+    def _parse_porcelain_z(raw: str) -> List[str]:
+        """Parses `git status --porcelain -z` output into paths.
+
+        Each entry is exactly ``XY<space>PATH``: two status columns then a single space.
+        The columns are position-significant and X is a space for a change that is not
+        staged, so an unstaged modification reads ``" M path"``.
+
+        A previous version stripped the line before slicing ``line[3:]``, which removed
+        that leading space and took the first character of the path with it. Every
+        *modified* file was therefore reported one character short — ``secrets/prod.pem``
+        became ``ecrets/prod.pem`` — and no lane or gate pattern matched it. Newly created
+        files are reported as ``"?? path"``, which has no leading space and parsed
+        correctly, so the defect only affected edits to files that already existed.
+        """
+        entries = raw.split("\0")
+        paths: List[str] = []
+        i = 0
+        while i < len(entries):
+            entry = entries[i]
+            i += 1
+            if len(entry) < 4:
+                continue
+            status, path = entry[:2], entry[3:]
+            if path:
+                paths.append(path)
+            # For a rename or copy the source path follows as its own NUL-terminated
+            # field; the destination is the one that was written, so skip the source.
+            if "R" in status or "C" in status:
+                i += 1
+        return paths
 
     def remove_worktree(
         self,
