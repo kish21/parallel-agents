@@ -65,18 +65,19 @@ Agent 3 → .lanekeeper/worktrees/agent-003
 Agents never edit the same physical files simultaneously.
 
 ### 3. Lane
-A lane defines which part of the codebase an agent is permitted to touch.
+A lane defines which part of the codebase an agent is permitted to touch. A lane is a
+feature, top to bottom — not a tech layer.
 ```yaml
-lane: backend
+lane: checkout
 
 allow:
-  - src/api/**
-  - src/services/**
-  - tests/api/**
+  - src/api/checkout/**
+  - src/services/payments/**
+  - src/frontend/checkout/**
+  - tests/checkout/**
 
 deny:
-  - src/frontend/**
-  - infrastructure/**
+  - src/api/checkout/legacy/**
 ```
 If the backend agent modifies `src/api/users.py`, that is allowed. If it touches `src/frontend/App.tsx`, validation reports a violation.
 
@@ -231,38 +232,141 @@ The core difference is **physical isolation**. Agents are not merely prompted to
 
 ## Lanes
 
-Lanes are how you define architectural ownership boundaries:
+A lane is a **feature slice, not a tech layer.**
+
+This is the single decision that makes or breaks a lane file. The tempting split is
+`backend` / `frontend` / `infra`, because it matches the folder tree. It is the wrong
+one: an ordinary ticket — *"an expired coupon still shows a struck-through price"* —
+touches a service, a schema, an API route, a React component and four tests. Under a layer
+split that is one ticket against four lanes, so either four agents coordinate to ship it
+or one agent escalates four times. Under a feature split it is one agent, one lane, one PR.
 
 ```yaml
 lanes:
-  backend:
+  checkout:                                 # a feature, top to bottom
     allow:
-      - src/api/**
-      - src/services/**
-      - tests/api/**
-    deny:
-      - src/frontend/**
-
-  frontend:
-    allow:
-      - src/frontend/**
-      - tests/frontend/**
-    deny:
-      - src/api/**
-
-  infrastructure:
-    allow:
-      - infrastructure/**
-      - deployment/**
+      - backend/app/domains/checkout/**
+      - backend/app/api/checkout.py
+      - backend/app/schemas/order.py
+      - frontend/src/components/checkout/**
+      - frontend/src/pages/CheckoutPage.tsx
+      - backend/tests/test_checkout.py
 ```
 
 ```
-backend agent        frontend agent        infrastructure agent
-      ↓                     ↓                       ↓
-backend files         frontend files        infrastructure files
+checkout agent        search agent          catalog agent
+      ↓                     ↓                      ↓
+ service · api         service · api         service · api
+ schema · page         schema · page         schema · page
+ provider · tests      provider · tests      provider · tests
 ```
 
-The goal is not to isolate every single file—it is to make parallel execution predictable.
+The goal is not to isolate every single file — it is that **one ticket lands in one lane.**
+
+---
+
+## The lane file
+
+`lanes.yaml` is the contract: a checked-in, hand-writable file that lanekeeper loads as the
+authority on who owns what. `lanekeeper init` can *propose* one by reading your folder tree,
+but it proposes for confirmation — the file, not the detection, is the source of truth.
+Hand-editing it is the expected act, and `check` and `spawn` honour the edit with no other
+action.
+
+A complete worked example — a mid-size e-commerce SaaS carved into 17 lanes and 8 shared
+zones, with every judgement call annotated — is in
+[`examples/feature-lanes.yaml`](examples/feature-lanes.yaml). The project is invented; the
+awkward parts of the split are not.
+
+### The whole schema
+
+```yaml
+version: 1
+
+unowned: new-modules      # a path in no lane and no shared zone:
+                          #   error | allow | <lane-name>
+
+defaults:
+  harness: claude-code    # inherited by every lane that does not override it
+
+lanes:
+  checkout:
+    description: Cart to confirmed order — addresses, shipping, the order write.
+    owner: senior         # a ROLE this lane needs, not a seat number
+    harness: claude-code  # optional; overrides defaults
+    allow:
+      - backend/app/domains/checkout/**
+      - frontend/src/components/checkout/**
+    deny:                 # carve-outs inside your own allow
+      - backend/app/domains/checkout/legacy/**
+
+  new-modules:
+    description: The greenfield lane.
+    claims: unowned       # at most one lane; holds every unclaimed path
+
+shared:
+  request-spine:
+    description: Where every feature plugs in.
+    steward: platform       # the lane that may edit without escalating,
+                            # and the lane everyone else escalates TO
+    mode: escalate          # escalate | append_only
+    paths:
+      - backend/app/main.py
+      - backend/app/config/platform.yaml
+
+  migrations:
+    description: Adding a file is free; editing an applied one is not.
+    mode: append_only       # any lane may ADD a file here; changing an
+    paths:                  # existing one is an escalation
+      - db/migrations/**
+```
+
+### The four rules that decide who owns a path
+
+1. **A shared zone always wins.** However specific a lane's `allow`, a path inside a shared
+   zone belongs to the zone. That is what makes `shared` mean anything.
+2. **Between lanes, specificity wins** — the pattern with the most wildcard-free path
+   segments, ties broken by pattern length. **Declaration order is irrelevant**, because the
+   file is hand-edited and a split that silently depends on line order is not reviewable. An
+   exact tie is a load error naming both lanes; it means you have not decided yet.
+3. **`deny` beats `allow` within a lane**, and only carves out of your own claim.
+4. **Anything left over goes where `unowned` says.** `error` if every file must have a home,
+   `allow` if you are enforcing loosely, or a lane name if — as is usually true — the
+   greenfield work has an owner too.
+
+### `owner` is a role, not a seat
+
+One lane, one owner at a time. But a real project has far more lanes than running agents —
+a 17-lane split routinely runs on four seats — so **the file names the role a lane needs,
+and `spawn` binds it to a seat.** A lane split is a design decision with a long half-life;
+who is sitting in front of it this week is not, and the two do not belong in the same
+field.
+
+### `shared` needs a steward
+
+The original design said a shared zone is owned by nobody and touching it needs escalation.
+Half of that survives contact with a real repo. `backend/app/main.py` is genuinely shared —
+every feature registers itself there — but if it is owned by nobody, then the platform lane,
+whose whole job is that file, escalates to no one in order to do its own work.
+
+So a zone may name a `steward`: the one lane that edits it directly, and the lane every
+other lane escalates *to*. `steward` is optional — omit it for a zone that really is
+everybody's, like the root `README.md`.
+
+### `append_only`, for directories that grow
+
+Some shared directories are touched by nearly every lane and still never collide, because
+each lane only ever *adds* a timestamped file: database migrations, feature docs,
+changelog fragments. Marking them `escalate` would put an escalation on routine work, and
+leaving them out of `shared` would let one lane rewrite an applied migration. `append_only`
+says the difference out loud: **adding a file is free, editing an existing one is an
+escalation.**
+
+### Shared zones are lists of paths, not folders
+
+Prefer naming files. `frontend/src/store/**` looks like the obvious shared zone until you
+notice `authStore.ts` sits in it and belongs squarely to the auth lane — and now auth
+escalates to touch its own file. A zone that swallows a folder taxes its neighbours.
 
 ---
 
