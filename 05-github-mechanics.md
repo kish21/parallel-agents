@@ -98,11 +98,16 @@ Six required fields do that:
    than remembered afterwards.
 5. **Out of scope** — what this ticket deliberately does not do. This is what stops a ticket growing
    while an agent is inside it.
-6. **Files and code areas touched** — this decides the Lane, and the Lane is what prevents
-   collisions. Ask filers to name shared files explicitly.
+6. **Files and code areas touched** — the boundary, and the one field to make required.
+   It is what prevents collisions, and it is what lets a single ticket be handed to an agent
+   on its own. Ask filers to name shared files explicitly.
 
-Add Lane and Owner dropdowns whose options match the board exactly, each with an explicit
-"not sure — needs a senior call" escape so nobody guesses.
+Make Lane a **free-text** field, not a dropdown, and leave it optional. A lane is a feature
+slice — `checkout`, its service and its page and its tests — and feature names are specific to
+your project, so a fixed list of options can only ever offer technology layers, which is the
+split this whole document argues against. A filer who is unsure should leave it blank rather
+than guess; the grouping is better decided across the whole backlog than one ticket at a time.
+Owner stays a dropdown, with an explicit "not sure — needs a senior call" escape.
 
 ## 5.7 Files in the repo
 

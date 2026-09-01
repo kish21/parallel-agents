@@ -1,6 +1,6 @@
 name: "Task / Feature"
 description: "File a discrete task or feature for parallel agent execution"
-title: "[Lane] Short description of task"
+title: "Short description of task"
 labels: ["task"]
 body:
   - type: markdown
@@ -9,19 +9,24 @@ body:
         ### 📋 Parallel Agent Task Definition
         Fill out this form to ensure clear boundaries across parallel seats.
 
-  - type: dropdown
+        The one field that matters is **Allowed File Paths**. It is the boundary the
+        merge gate enforces, and it is what lets this ticket be handed to an agent on
+        its own if it comes to that.
+
+  - type: input
     id: lane
     attributes:
-      label: Lane (Code Path Boundary)
-      description: Which area of the codebase does this ticket modify?
-      options:
-        - interface
-        - service
-        - data
-        - platform
-        - shared — needs a senior call
+      label: Lane (which feature this belongs to)
+      description: >-
+        A feature, top to bottom — its service, its schema, its API route, its page
+        and its tests. Not a technology layer: not "backend", not "frontend", not
+        "data". A ticket to build a feature touches both sides of the stack, so under
+        layer lanes it has no single owner. Leave it blank if you are not sure;
+        lanekeeper reads the backlog as a whole and proposes the grouping, which is a
+        better guess than a single ticket can make.
+      placeholder: "checkout"
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: owner
@@ -47,9 +52,15 @@ body:
     id: allowed_paths
     attributes:
       label: Allowed File Paths
-      description: List the directories or files this task is permitted to touch.
+      description: >-
+        The files and directories this task is permitted to touch — **one path or glob
+        per line**. Name what this feature actually owns across the whole stack, not
+        one side of it. No need to tidy your repository first; a path can point
+        anywhere it already is.
       placeholder: |
-        frontend/src/components/
-        frontend/src/pages/
+        backend/app/domains/checkout/**
+        backend/app/api/checkout.py
+        frontend/src/components/checkout/**
+        tests/checkout/**
     validations:
       required: true

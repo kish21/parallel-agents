@@ -11,8 +11,12 @@ This project is a practical, vendor-neutral framework designed to make parallel 
 ### 1. Reporting Bugs & Proposing Enhancements
 * **Search Existing Issues**: Before opening a new issue, check if a similar topic is already being discussed.
 * **Use Issue Forms**: When filing a bug or proposing a feature, use the structured GitHub Issue templates:
-  * **Tasks & Features**: Include the target **Lane** (`interface`, `service`, `data`, `platform`) and allowed path boundaries.
-  * **Defects**: Provide exact reproduction steps and error logs.
+  * **Tasks & Features**: Always fill in **Allowed File Paths** — one path or glob per
+    line. That is the boundary, and it is the field the merge gate enforces. **Lane** is
+    optional: it names a *feature* the work belongs to (`intake`, `lanes`, `worktrees`),
+    never a technology layer. Leave it blank if you are unsure.
+  * **Defects**: Provide exact reproduction steps and error logs, and the file paths too —
+    a bug is as likely as a feature to be handed to an agent on its own.
 
 ---
 
