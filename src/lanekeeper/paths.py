@@ -166,14 +166,34 @@ def default_worktree_dir(root: Optional[Path] = None) -> str:
     return _posix(home_dirname(root), WORKTREES_DIRNAME)
 
 
+#: Subdirectories of lanekeeper's home that hold runtime state. They change as a side
+#: effect of running an agent and are ignored by git, so a change there is never work.
+RUNTIME_DIRNAMES = (STATE_DIRNAME, LOGS_DIRNAME, WORKTREES_DIRNAME, START_DIRNAME)
+
+
 def ignored_prefixes(root: Optional[Path] = None) -> Tuple[str, ...]:
     """Path prefixes that lane checks treat as bookkeeping rather than work.
 
-    These are lanekeeper's directory and git's, both of which change as a side
-    effect of running an agent and so must never count as an agent writing
-    outside its lane.
+    Only the *runtime* parts of lanekeeper's directory, plus git's own. An earlier
+    version exempted the whole home directory, which also exempted ``config.yaml``
+    and the capability cards — the two tracked files that define what every lane may
+    touch. An agent could widen its own lane in the same pull request and the gate
+    would not mention it. Those files are ``policy_paths`` now, and denied to every
+    lane.
     """
-    return (_posix(home_dirname(root), ""), ".git/")
+    name = home_dirname(root)
+    return tuple(_posix(name, d, "") for d in RUNTIME_DIRNAMES) + (".git/",)
+
+
+def policy_paths(root: Optional[Path] = None) -> Tuple[str, ...]:
+    """The files that define the boundaries: the lane policy and the seat cards.
+
+    A trailing slash marks a directory prefix. No lane may change these — a change to
+    the rules is a change to the rules, and it is made on the main checkout by a person,
+    never inside an agent's pull request.
+    """
+    name = home_dirname(root)
+    return (_posix(name, CONFIG_FILENAME), _posix(name, CAPABILITIES_DIRNAME, ""))
 
 
 def gitignore_lines(root: Optional[Path] = None) -> Tuple[str, ...]:

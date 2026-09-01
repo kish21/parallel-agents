@@ -180,26 +180,41 @@ class WorktreeManager:
         if not worktree_path.exists():
             return []
 
-        # Both queries use -z: NUL-separated output is never quoted or escaped, so paths
-        # containing spaces, quotes or non-ASCII characters survive intact.
-
         # 1. Committed diff against base branch
-        diff_res = self._run_git(
-            ["diff", "--name-only", "-z", f"{base}...HEAD"],
-            cwd=worktree_path,
-            check=False,
-        )
-        committed_files = [f for f in diff_res.stdout.split("\0") if f]
+        committed_files = self.diff_files(base, "HEAD", cwd=worktree_path)
 
-        # 2. Uncommitted & untracked working-tree changes
+        # 2. Uncommitted & untracked working-tree changes. The failure of this call is
+        #    also a failure of the check: an empty list is what a clean tree returns, and
+        #    a validator that cannot tell the two apart passes whatever it could not see.
         status_res = self._run_git(
             ["status", "--porcelain", "-z", "-uall"],
             cwd=worktree_path,
-            check=False,
         )
         uncommitted_files = self._parse_porcelain_z(status_res.stdout)
 
         return list(dict.fromkeys(committed_files + uncommitted_files))
+
+    def diff_files(self, base: str, head: str = "HEAD",
+                   cwd: Optional[Path] = None) -> List[str]:
+        """Every path that differs between the merge base of `base` and `head`.
+
+        Raises ``GitError`` when git cannot compute it — an unknown base branch, a
+        shallow clone with no merge base. This used to swallow the error and return no
+        files, and "no files" is exactly what a clean branch looks like: an agent whose
+        base branch was misnamed had every committed change waved through as "All 0
+        changed files are within allowed lane paths."
+
+        ``--no-renames`` because a rename is a deletion and a creation, and the deletion
+        is a change to the file that was deleted. With detection on, git reports only the
+        destination, so moving a file out of another lane — or out of `secrets/` — into
+        this one looked like an ordinary in-lane addition. ``-z`` so paths containing
+        spaces, quotes or non-ASCII characters survive intact.
+        """
+        res = self._run_git(
+            ["diff", "--name-only", "-z", "--no-renames", f"{base}...{head}"],
+            cwd=cwd,
+        )
+        return [f for f in res.stdout.split("\0") if f]
 
     @staticmethod
     def _parse_porcelain_z(raw: str) -> List[str]:
@@ -208,6 +223,10 @@ class WorktreeManager:
         Each entry is exactly ``XY<space>PATH``: two status columns then a single space.
         The columns are position-significant and X is a space for a change that is not
         staged, so an unstaged modification reads ``" M path"``.
+
+        A rename or copy is followed by its source path as a second NUL-terminated
+        field. Both are reported: the destination was written, and the source was
+        deleted, which is a change to a file that may belong to somebody else's lane.
 
         A previous version stripped the line before slicing ``line[3:]``, which removed
         that leading space and took the first character of the path with it. Every
@@ -227,10 +246,11 @@ class WorktreeManager:
             status, path = entry[:2], entry[3:]
             if path:
                 paths.append(path)
-            # For a rename or copy the source path follows as its own NUL-terminated
-            # field; the destination is the one that was written, so skip the source.
-            if "R" in status or "C" in status:
+            if ("R" in status or "C" in status) and i < len(entries):
+                source = entries[i]
                 i += 1
+                if source:
+                    paths.append(source)
         return paths
 
     def remove_worktree(

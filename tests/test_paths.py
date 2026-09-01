@@ -86,7 +86,11 @@ class TestDerivedPaths(PathsTestCase):
             self.assertEqual(paths.logs_dir(self.root), self.root / ".agents" / "logs")
             self.assertEqual(paths.capabilities_dir(self.root), self.root / ".agents" / "capabilities")
             self.assertEqual(paths.default_worktree_dir(self.root), ".agents/worktrees")
-            self.assertEqual(paths.ignored_prefixes(self.root), (".agents/", ".git/"))
+            self.assertEqual(
+                paths.ignored_prefixes(self.root),
+                (".agents/state/", ".agents/logs/", ".agents/worktrees/", ".agents/start/", ".git/"))
+            self.assertEqual(paths.policy_paths(self.root),
+                             (".agents/config.yaml", ".agents/capabilities/"))
 
     def test_display_strings_use_forward_slashes(self):
         """These are shown to users and written into files read on every platform."""

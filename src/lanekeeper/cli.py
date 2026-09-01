@@ -27,6 +27,8 @@ from .capabilities import (
     save_card,
 )
 from .config import Config, UnknownLaneError, load_config, save_config
+from . import check as check_mod
+from .desk import EditorNotFoundError, open_worktree
 from .doctor import Doctor
 from . import paths
 from .frameworks import default_url_templates
@@ -39,10 +41,10 @@ from .trackers import UnknownTrackerError, get_tracker
 from .layout import detect_layout, measure_coverage, tracked_files
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
-from .ports import PortManager
-from .state import AgentState, AgentStatus, StateManager
+from .ports import TERMINAL_STATUSES, PortManager
+from .state import AgentState, AgentStatus, StateCorruptError, StateManager
 from .validator import Validator
-from .worktree import WorktreeManager
+from .worktree import GitError, WorktreeManager
 
 
 def _config_for_start(root: Path) -> Config:
@@ -462,7 +464,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     # persisted inside the lock so a concurrent spawn immediately sees the ID as taken.
     try:
         with state_mgr.lock():
-            active_agents = [a for a in state_mgr.list_agents() if a.status != AgentStatus.STOPPED.value]
+            active_agents = [a for a in state_mgr.list_agents() if a.status not in TERMINAL_STATUSES]
             if len(active_agents) >= config.max_agents and not args.force:
                 print(f"❌ Max concurrent agents reached ({config.max_agents}). Use --force or stop an existing agent.", file=sys.stderr)
                 return 1
@@ -533,7 +535,83 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"  • Seat:     {seat}")
     print(f"\nTo inspect:  lanekeeper inspect {agent_id}")
     print(f"To validate: lanekeeper validate {agent_id}")
+    if getattr(args, "open", False):
+        # The agent exists whether or not the editor opens; a missing editor is reported
+        # and the spawn still succeeded.
+        return _open_desk(config, resolved_path, agent_id)
+    print(f"To open:     lanekeeper open {agent_id}")
     return 0
+
+
+def _open_desk(config: Config, worktree: Path, agent_id: str) -> int:
+    try:
+        argv = open_worktree(config.editor, worktree)
+    except EditorNotFoundError as e:
+        print(f"⚠️  {e}", file=sys.stderr)
+        return 1
+    print(f"🪟 Opened {agent_id} in the editor: {' '.join(argv)}")
+    return 0
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    """Opens an agent's worktree in the configured editor."""
+    root = Path.cwd()
+    try:
+        config = load_config(root)
+        state_mgr = StateManager(root)
+    except Exception as e:
+        print(f"❌ Error loading project: {e}", file=sys.stderr)
+        return 1
+    agent = state_mgr.get_agent(args.agent)
+    if not agent:
+        print(f"❌ Agent '{args.agent}' not found.", file=sys.stderr)
+        return 1
+    worktree = Path(agent.worktree_path)
+    if not worktree.exists():
+        print(f"❌ Worktree {worktree} does not exist. Run 'lanekeeper doctor'.", file=sys.stderr)
+        return 1
+    return _open_desk(config, worktree, agent.id)
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """The boundary check as a pull-request gate. See `lanekeeper.check`."""
+    root = Path.cwd()
+
+    if args.write_workflow:
+        written = check_mod.write_workflow(root, args.label_prefix, force=args.force)
+        if written is None:
+            print(f"ℹ️  {check_mod.WORKFLOW_PATH} already exists. Use --force to replace it.")
+            return 0
+        print(f"📝 Wrote {written.relative_to(root)}")
+        print(f"   It runs on every pull request and needs exactly one "
+              f"'{args.label_prefix} <name>' label on the change.")
+        return 0
+
+    try:
+        config = load_config(root)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+
+    try:
+        if args.lane:
+            lane = args.lane
+        elif args.labels_json is not None:
+            lane = check_mod.lane_from_labels_json(args.labels_json, args.label_prefix)
+        else:
+            raise check_mod.NoLaneError(
+                "Say which lane this change belongs to: --lane <name>, or --labels-json "
+                "with the pull request's labels.")
+    except check_mod.NoLaneError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 2
+
+    report = check_mod.check_checkout(
+        config, root, lane, base=args.base, head=args.head,
+        include_working_tree=args.working_tree)
+    print()
+    print(check_mod.render(report))
+    return 0 if report.passed else 2
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -623,7 +701,11 @@ def cmd_diff(args: argparse.Namespace) -> int:
         print(f"❌ Worktree {worktree_path} does not exist.", file=sys.stderr)
         return 1
 
-    changed_files = worktree_mgr.get_changed_files(worktree_path)
+    try:
+        changed_files = worktree_mgr.get_changed_files(worktree_path)
+    except GitError as e:
+        print(f"❌ Could not read this agent's changes: {e}", file=sys.stderr)
+        return 1
     try:
         lane_config = config.get_lane(agent.lane)
     except UnknownLaneError as e:
@@ -638,7 +720,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
     for f in changed_files:
         norm_f = LaneEngine.normalize_path(f)
-        if norm_f in (".env", ".lane", ".gitignore") or any(norm_f.startswith(prefix) for prefix in paths.ignored_prefixes()):
+        if LaneEngine.is_bookkeeping(norm_f):
             continue
 
         violation = None
@@ -737,14 +819,19 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 
     worktree_path = Path(agent.worktree_path)
 
-    # Check uncommitted changes
+    # Check uncommitted changes. Answering "y" is the same decision as --force, and it
+    # is carried into the removal below: an earlier version asked, took the answer, and
+    # then removed the worktree without force anyway, so the person who did the careful
+    # thing was refused and the agent was marked as failing cleanup.
+    force = args.force
     if worktree_path.exists() and worktree_mgr.has_uncommitted_changes(worktree_path):
-        if not args.force:
+        if not force:
             print(f"⚠️ Agent '{agent.name}' has uncommitted changes in {worktree_path}.")
             confirm = input("Are you sure you want to delete this worktree? [y/N]: ").strip().lower()
             if confirm != "y":
                 print("❌ Cleanup aborted. Changes preserved.")
                 return 1
+            force = True
 
     # 1. Stop process
     adapter.stop(agent)
@@ -763,7 +850,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         try:
             with state_mgr.git_lock():
                 if worktree_path.resolve() in registered:
-                    worktree_mgr.remove_worktree(worktree_path, force=args.force)
+                    worktree_mgr.remove_worktree(worktree_path, force=force)
                 else:
                     # The directory outlived its registration — `git worktree prune` drops
                     # the record as soon as the path is unreachable, and a failed earlier
@@ -961,7 +1048,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_spawn.add_argument("--seat", help="Seat slot (e.g. SR1, SR2, JR1, JR2)")
     p_spawn.add_argument("--command", help="Optional CLI command/harness to start in worktree")
     p_spawn.add_argument("--force", action="store_true", help="Bypass max agent capacity check")
+    p_spawn.add_argument("--open", action="store_true",
+                         help="Open the new worktree in the configured editor")
     p_spawn.set_defaults(func=cmd_spawn)
+
+    # open
+    p_open = subparsers.add_parser("open", help="Open an agent's worktree in the configured editor")
+    p_open.add_argument("agent", help="Agent ID or name")
+    p_open.set_defaults(func=cmd_open)
+
+    # check
+    p_chk = subparsers.add_parser(
+        "check",
+        help="Check that a change stays inside one lane; the pull-request gate")
+    p_chk.add_argument("--lane", help="The lane this change belongs to")
+    p_chk.add_argument("--labels-json",
+                       help="The pull request's labels as a JSON array; the lane is read "
+                            "from the one starting with the label prefix")
+    p_chk.add_argument("--label-prefix", default=check_mod.DEFAULT_LABEL_PREFIX,
+                       help=f"Label prefix naming the lane (default '{check_mod.DEFAULT_LABEL_PREFIX}')")
+    p_chk.add_argument("--base", default="origin/main",
+                       help="The branch the change will merge into (default origin/main)")
+    p_chk.add_argument("--head", default="HEAD", help="The change (default HEAD)")
+    p_chk.add_argument("--working-tree", action="store_true",
+                       help="Also check uncommitted and untracked files")
+    p_chk.add_argument("--write-workflow", action="store_true",
+                       help=f"Write the GitHub Actions workflow to {check_mod.WORKFLOW_PATH.as_posix()} and exit")
+    p_chk.add_argument("--force", action="store_true",
+                       help="With --write-workflow, replace an existing workflow file")
+    p_chk.set_defaults(func=cmd_check)
 
     # stop
     p_stop = subparsers.add_parser("stop", help="Stop a running agent process")
@@ -1023,7 +1138,13 @@ def main() -> None:
     if not hasattr(args, "func"):
         parser.print_help()
         sys.exit(1)
-    sys.exit(args.func(args))
+    try:
+        sys.exit(args.func(args))
+    except StateCorruptError as e:
+        # Every command reads state. A damaged ledger must stop all of them with the
+        # same message, and never with a traceback.
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

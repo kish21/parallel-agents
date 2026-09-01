@@ -12,7 +12,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the boundary check now holds
+
+A review of v0.6.0 against a real repository found five ways a change could leave its
+lane and `validate` would pass it. All five are closed, each pinned by a test in
+`tests/test_gate_holes.py` that reproduces the escape first.
+
+- **A rename out of another lane was invisible.** Git's rename detection reported only
+  the destination, and the porcelain parser skipped the source on purpose. `git mv
+  src/frontend/App.tsx src/backend/App.tsx` validated clean for the backend lane; so did
+  moving a file out of `secrets/`. Both sides of a rename are now reported.
+- **A base branch git could not diff against produced an empty change list**, and an
+  empty change list validates clean: "All 0 changed files are within allowed lane
+  paths." A diff that cannot be computed is now a failed validation that says so.
+- **The lane policy was exempt from the lane check.** Everything under `.lanekeeper/`
+  was skipped, including the tracked `config.yaml` and the seat cards, so an agent could
+  widen its own lane in the same pull request. Only the runtime subdirectories are
+  exempt now; the policy files are denied to every lane. `.gitignore` is ordinary work.
+- **A lane with no `allow` patterns allowed everything.** Refused at load, by name.
+- **A deny written as a directory (`secrets/`) matched nothing** in a lane, while the
+  capability gates expanded the same spelling to `secrets/**`. One reading now.
+- **An unreadable state ledger was read as empty**, so a damaged `ports.json` freed
+  every port and the next save replaced the file. It now stops every command with a
+  message and changes nothing.
+- **`cleanup` asked for confirmation and ignored the answer.** Answering `y` removed
+  nothing and marked the agent as failing cleanup. `y` now means what `--force` means.
+
 ### Added
+
+- **`lanekeeper check` — the boundary check as a pull-request gate.** The same lane
+  engine, handed a lane name and a diff instead of an agent record, so it runs anywhere
+  there is a checkout. `--write-workflow` installs a GitHub Actions workflow that runs it
+  on every pull request, reading the lane from a `lane: <name>` label — the label family
+  `bootstrap.sh` creates — and failing closed when there is not exactly one. A change to
+  the policy files is checked under the reserved lane `policy`, which may touch those
+  files and nothing else.
+
+- **`lanekeeper open` and `spawn --open` — the desk.** Opens the agent's worktree in
+  the configured editor (`editor.command`, default `code`). The worktree's `.lane` file
+  now carries the task and the lane's `ALLOW` and `DENY` patterns, so an agent told to
+  read it knows its boundary without the configuration.
+
 
 - **`lanekeeper start`, and the question it asks before anything else.** Everything the
   tool does downstream — how the work divides, who owns what, what the merge gate

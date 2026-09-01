@@ -58,6 +58,15 @@ PORTS_FILENAME = "ports.json"
 COUNTER_FILENAME = "counter.json"
 
 
+class StateCorruptError(RuntimeError):
+    """Raised when a state file exists but cannot be read as the record it should be.
+
+    It used to be read as empty. That is the most dangerous possible reading: an
+    unreadable ``ports.json`` meant every port was free, and the next ``save_agent``
+    wrote a ledger containing one agent over the top of the file that had held four.
+    """
+
+
 class StateManager:
     def __init__(self, root_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path.cwd()
@@ -89,14 +98,32 @@ class StateManager:
             self._write_json(self.ports_file, {})
 
     @staticmethod
-    def _read_json(path: Path) -> Dict[str, Any]:
+    def _read_json(path: Path, strict: bool = True) -> Dict[str, Any]:
+        """Reads a state file. A missing file is empty; a damaged one is an error.
+
+        ``strict=False`` is for a file whose contents are advisory and reconciled
+        against another source on every read (the id counter). The agent and port
+        ledgers are never read that way.
+        """
         if not path.exists():
             return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            if not strict:
+                return {}
+            raise StateCorruptError(
+                f"{path} cannot be read ({e}). Nothing was changed. Restore it from the "
+                f"copy you trust, or if it is empty, delete it and run 'lanekeeper repair'."
+            ) from e
+        if not isinstance(data, dict):
+            if not strict:
+                return {}
+            raise StateCorruptError(
+                f"{path} does not hold a record (found {type(data).__name__}). "
+                f"Nothing was changed.")
+        return data
 
     @staticmethod
     def _write_json(path: Path, data: Dict[str, Any]) -> None:
@@ -152,7 +179,7 @@ class StateManager:
         """
         with self.lock():
             agents = self._read_json(self.agents_file)
-            counter = self._read_json(self.counter_file)
+            counter = self._read_json(self.counter_file, strict=False)
 
             try:
                 last_issued = int(counter.get("last_agent_index", 0))

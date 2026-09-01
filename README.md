@@ -242,12 +242,33 @@ Lane: backend
 lanekeeper diff agent-001
 ```
 
-### 9. Stop an Agent
+### 9. Open the Agent's Desk
+```bash
+lanekeeper open agent-001          # or: lanekeeper spawn ... --open
+```
+Opens the worktree in your editor — `code` by default, set under `editor:` in
+`config.yaml`. The worktree's `.lane` file names the lane, the task, and the exact
+`ALLOW` and `DENY` patterns, so an agent told "read `.lane`" knows its boundary.
+
+### 10. Gate Every Pull Request
+```bash
+lanekeeper check --write-workflow  # writes .github/workflows/lanekeeper-gate.yml
+```
+`validate` is what you run by hand. `check` is the same lane engine run by CI on every
+pull request, with **no agent state needed**: it reads the lane from a `lane: <name>`
+label on the pull request and fails if any changed file is outside it. No label, no
+pass. Run it yourself on a branch with:
+
+```bash
+lanekeeper check --lane checkout --base origin/main
+```
+
+### 11. Stop an Agent
 ```bash
 lanekeeper stop agent-001
 ```
 
-### 10. Clean Up Safely
+### 12. Clean Up Safely
 ```bash
 lanekeeper cleanup agent-001
 ```
@@ -430,7 +451,23 @@ lookup is strict:
   rather than checking the agent against an empty policy.
 
 There is deliberately no permissive fallback. An unrecognised lane is a configuration
-error, never a lane that happens to allow every path.
+error, never a lane that happens to allow every path. The loader keeps that promise too:
+
+* A lane with **no `allow` patterns** is refused at load. `allow: []` used to be read as
+  "allow everything"; it is now an error that names the lane.
+* A pattern written as a directory — `secrets/` — means everything under it, in lanes
+  and capability gates alike. It used to match nothing in a lane.
+* **A rename is two changes.** Moving a file out of another lane, or out of a denied
+  directory, reports the source path as a change to that path. It used to report only
+  the destination.
+* **A diff that cannot be computed is a failed check**, never an empty one. If the base
+  branch does not exist, `validate` and `check` say "nothing was checked" and fail.
+* **The policy is not subject to the policy.** `.lanekeeper/config.yaml` and the seat
+  cards under `.lanekeeper/capabilities/` are denied to every lane, however wide its
+  `allow`. A change to them is made by a person, in its own pull request, checked under
+  the reserved lane name `policy` — which may touch those files and nothing else.
+* A state ledger that cannot be read stops every command with a message. It used to be
+  read as empty, and the next write replaced it.
 
 > **Commit `.lanekeeper/config.yaml`.** It is the policy every agent is validated
 > against — the team's shared contract. `lanekeeper init` adds ignore rules that keep
@@ -691,6 +728,8 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
+| **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. `--write-workflow` installs it in GitHub Actions. |
+| **`lanekeeper open`** | Opens an agent's worktree in the configured editor. |
 | **`lanekeeper diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
 | **`lanekeeper inspect`** | Shows detailed agent metadata and environment variables. |
 | **`lanekeeper logs`** | Tails structured execution logs for an agent session. |

@@ -17,7 +17,7 @@ from .config import Config, UnknownLaneError
 from .lanes import LaneEngine, LaneValidationResult
 from . import paths
 from .state import StateManager
-from .worktree import WorktreeManager
+from .worktree import GitError, WorktreeManager
 
 
 @dataclass
@@ -80,11 +80,11 @@ class Validator:
         """Returns the first matching pattern, or None.
 
         A pattern ending in '/' is a directory prefix (the form used by the card examples
-        in 03-orchestration.md), so it is expanded to a recursive glob.
+        in 03-orchestration.md). `match_glob` reads it that way for lanes and gates alike,
+        so the two no longer disagree about what `secrets/` means.
         """
         for pattern in patterns:
-            expanded = pattern[:-1] + "/**" if pattern.endswith("/") else pattern
-            if LaneEngine.match_glob(path, expanded):
+            if LaneEngine.match_glob(path, pattern):
                 return pattern
         return None
 
@@ -206,7 +206,15 @@ class Validator:
             errors.append(f"{e} Agent '{agent.id}' cannot be validated against an undeclared lane.")
             return failed()
 
-        changed_files = self.worktree_mgr.get_changed_files(worktree_path)
+        # A diff that cannot be computed is a failed validation, not an empty one. The
+        # empty list is what a clean branch returns, and nothing downstream could tell
+        # "nothing changed" from "I could not look".
+        try:
+            changed_files = self.worktree_mgr.get_changed_files(worktree_path)
+        except GitError as e:
+            errors.append(
+                f"Could not read this agent's changes, so nothing was checked: {e}")
+            return failed()
         lane_result = LaneEngine.validate_files(changed_files, lane_config)
 
         # A file that no declared lane would accept is a symptom of a lane configuration
@@ -217,7 +225,12 @@ class Validator:
             if v.reason == "not_allowed" and not self._any_lane_allows(v.filepath)
         ]
         for v in lane_result.violations:
-            if v.reason == "denied":
+            if v.reason == "policy":
+                errors.append(
+                    f"Lane policy modified: {v.filepath}. No lane may change the file that "
+                    f"defines the lanes; make that change on the main checkout, not in an "
+                    f"agent's branch.")
+            elif v.reason == "denied":
                 errors.append(
                     f"Forbidden file modified (matched deny pattern '{v.matched_pattern}'): {v.filepath}")
             else:
