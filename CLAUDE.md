@@ -59,7 +59,7 @@ lifecycle. Verified against a real full-stack application.
 README with a fully worked 17-lane example in `examples/feature-lanes.yaml`. Nothing
 reads that file yet; it is the contract steps 2–4 will write to.
 
-**This session (#37, step 1 of the #36 umbrella):** `lanekeeper start` and
+**In review (#37, step 1 of the #36 umbrella — PR #45):** `lanekeeper start` and
 `lanekeeper intake` — the pre-flight gate. Design doc:
 [`docs/start-step1-intake.md`](docs/start-step1-intake.md).
 
@@ -78,7 +78,7 @@ reads that file yet; it is the contract steps 2–4 will write to.
 
 | Step | What it does | Issue | State |
 |---|---|---|---|
-| 1 | Is the work written down, and does it cover the features? | #37 | **done this session** |
+| 1 | Is the work written down, and does it cover the features? | #37 | **done — PR #45** |
 | 2 | Group the features into modules — from the issues, or from the code | #38 | **next** |
 | 3 | Separate a dependency from a collision; fuse or share | #39 | not started |
 | 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | not started |
@@ -94,7 +94,7 @@ reads that file yet; it is the contract steps 2–4 will write to.
 
 **How to resume**
 
-1. `git checkout main && git pull` — #37's PR should be merged first.
+1. `git checkout main && git pull` — PR #45 (#37) should be merged first.
 2. Read `docs/start-step1-intake.md` for the shape step 2 inherits, then issue #38.
 3. Step 2 is handed an `IntakeResult` (`lanekeeper.intake.models`) — the issues, the
    product description that was read, and which features matched which tickets. That is
