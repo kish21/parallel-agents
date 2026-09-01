@@ -10,6 +10,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`lanekeeper start`, and the question it asks before anything else.** Everything the
+  tool does downstream — how the work divides, who owns what, what the merge gate
+  enforces — is derived from the issues. If the issues are missing or thin, dividing them
+  produces a confident-looking split of nothing. `start` is now the guided entry point,
+  and its first step is that check: is the work written down, and does it cover what this
+  product is meant to do? On a project with nothing written down it explains what
+  product-playbook is and what to run (`/vision`, `/scope`, `/plan`), and exits having
+  changed nothing at all.
+
+  Coverage is judged against `PRODUCT.md` first — product-playbook's own output, and the
+  reason the two tools are a pair — then a README, and if there is neither, it says so
+  plainly: *"I count 12 pieces of work and I cannot tell whether that is all of them."*
+  That third case is never dressed up as a verdict. Answer it with `--take-as-is`.
+
+  The result is recorded with a fingerprint of the work it was based on, so fixing your
+  issues and running `start` again continues rather than restarting. `lanekeeper intake`
+  runs the same check on its own.
+
+- **An issue-tracker provider interface** (`lanekeeper.trackers`). GitHub Issues is one
+  implementation of it, selected by `intake.tracker` in `config.yaml`, not an assumption
+  baked into the logic that reads it. A tracker that cannot be read reports *why* in plain
+  words — unreadable is not the same as empty, and telling someone to write down work they
+  already have would be the worst available wrong answer.
+
+- **An `intake` section in `config.yaml`.** Where the work is read from, which documents
+  describe the product, and every threshold the check judges by. It is absent from every
+  configuration written before this release and is fully defaulted on load, so existing
+  projects are unaffected.
+
+### Unchanged
+
+- **`init` is exactly as it was.** It is no longer the front door — `start` is — but it is
+  neither rewritten nor deprecated, and nothing about its behaviour changed. It remains
+  the direct route for someone who already knows how their work divides. Nobody on v0.6.0
+  breaks.
+
+---
+
 ## [v0.6.0]
 
 Everything here comes from running the CLI against a real full-stack application — a live

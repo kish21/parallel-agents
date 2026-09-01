@@ -95,6 +95,51 @@ class CapabilityGate:
 
 
 @dataclass
+class GitHubTrackerConfig:
+    """How to read GitHub Issues. Every value here is settable, including the
+    executable, so the call can be pointed at a wrapper or stubbed in a test."""
+
+    repo: str = ""            # blank: the repository this directory belongs to
+    state: str = "open"
+    limit: int = 500
+    command: str = "gh"
+
+
+@dataclass
+class IntakeThresholds:
+    """The numbers step 1 judges by, kept out of the code that applies them.
+
+    They are judgement calls on a heuristic, not constants: a project with a coarse
+    backlog and a project with fine-grained tickets need different answers, and the
+    person who knows which is which is the user, not this module.
+    """
+
+    thin_issue_count: int = 3        # fewer tickets than this reads as thin
+    feature_match_score: float = 0.5  # share of a feature's words a ticket must carry
+    duplicate_title_score: float = 0.85
+    broad_ticket_areas: int = 3      # distinct code areas one ticket may name
+    tidy_flag_ratio: float = 0.5     # share of flagged tickets that stops the run
+    duplicate_report_limit: int = 10  # closest near-duplicate pairs worth showing
+
+
+@dataclass
+class IntakeConfig:
+    """Step 1 of `lanekeeper start`: where the work is written down, and what to
+    compare it against. See docs/start-step1-intake.md."""
+
+    tracker: str = "github"
+    github: GitHubTrackerConfig = field(default_factory=GitHubTrackerConfig)
+    # In order of preference. The first that yields features is the one used.
+    spec_sources: List[str] = field(
+        default_factory=lambda: ["PRODUCT.md", "docs/PRODUCT.md", "README.md"]
+    )
+    spec_sections: List[str] = field(
+        default_factory=lambda: ["Scope", "Plan", "Features"]
+    )
+    thresholds: IntakeThresholds = field(default_factory=IntakeThresholds)
+
+
+@dataclass
 class GitConfig:
     protected_branches: List[str] = field(default_factory=lambda: ["main", "master"])
     branch_prefix: str = "parallel/"
@@ -113,6 +158,7 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     capability_gates: Dict[str, CapabilityGate] = field(default_factory=dict)
+    intake: IntakeConfig = field(default_factory=IntakeConfig)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -236,6 +282,25 @@ class Config:
                 "host": self.environment.host,
                 "url_templates": dict(self.environment.url_templates),
             },
+            "intake": {
+                "tracker": self.intake.tracker,
+                "github": {
+                    "repo": self.intake.github.repo,
+                    "state": self.intake.github.state,
+                    "limit": self.intake.github.limit,
+                    "command": self.intake.github.command,
+                },
+                "spec_sources": list(self.intake.spec_sources),
+                "spec_sections": list(self.intake.spec_sections),
+                "thresholds": {
+                    "thin_issue_count": self.intake.thresholds.thin_issue_count,
+                    "feature_match_score": self.intake.thresholds.feature_match_score,
+                    "duplicate_title_score": self.intake.thresholds.duplicate_title_score,
+                    "broad_ticket_areas": self.intake.thresholds.broad_ticket_areas,
+                    "tidy_flag_ratio": self.intake.thresholds.tidy_flag_ratio,
+                    "duplicate_report_limit": self.intake.thresholds.duplicate_report_limit,
+                },
+            },
         }
 
     @classmethod
@@ -249,6 +314,9 @@ class Config:
         db_data = data.get("database", {})
         env_data = data.get("environment", {}) or {}
         gates_data = data.get("capability_gates", {}) or {}
+        # Absent from every configuration written before v0.7. A missing section is a
+        # fully-defaulted one, so an existing project keeps working untouched.
+        intake_data = data.get("intake", {}) or {}
 
         lanes = {}
         if isinstance(lanes_data, list):
@@ -304,7 +372,81 @@ class Config:
                 )
                 for name, spec in gates_data.items()
             },
+            intake=_parse_intake(intake_data),
         )
+
+
+class InvalidIntakeSettingError(ValueError):
+    """Raised when a value in the `intake` section cannot be used as written.
+
+    Named rather than generic: the alternative to a clear message is a traceback out of
+    `load_config` on a command a user runs before anything else works.
+    """
+
+    def __init__(self, key: str, value, expected: str):
+        super().__init__(
+            f"intake.{key} must be {expected}, but the configuration says {value!r}."
+        )
+
+
+def _typed(raw: Dict[str, Any], key: str, default, caster, expected: str, prefix: str):
+    """One configured value, defaulted when absent and explained when unusable."""
+    if key not in raw or raw[key] is None:
+        return default
+    try:
+        return caster(raw[key])
+    except (TypeError, ValueError):
+        raise InvalidIntakeSettingError(f"{prefix}{key}", raw[key], expected) from None
+
+
+def _parse_intake(raw: Dict[str, Any]) -> IntakeConfig:
+    """Builds the intake section, defaulting every value that is absent.
+
+    Each key is read independently rather than all-or-nothing, so a user who sets one
+    threshold in their configuration does not silently lose the others. An explicitly
+    empty list is honoured rather than replaced by the default: "compare against
+    nothing" is a legitimate thing to ask for.
+    """
+    defaults = IntakeConfig()
+    gh_raw = raw.get("github", {}) or {}
+    th_raw = raw.get("thresholds", {}) or {}
+
+    github = GitHubTrackerConfig(
+        repo=str(gh_raw.get("repo") or ""),
+        state=str(gh_raw.get("state") or defaults.github.state),
+        limit=_typed(gh_raw, "limit", defaults.github.limit, int, "a whole number",
+                     "github."),
+        command=str(gh_raw.get("command") or defaults.github.command),
+    )
+    thresholds = IntakeThresholds(
+        thin_issue_count=_typed(th_raw, "thin_issue_count",
+                                defaults.thresholds.thin_issue_count, int,
+                                "a whole number", "thresholds."),
+        feature_match_score=_typed(th_raw, "feature_match_score",
+                                   defaults.thresholds.feature_match_score, float,
+                                   "a number between 0 and 1", "thresholds."),
+        duplicate_title_score=_typed(th_raw, "duplicate_title_score",
+                                     defaults.thresholds.duplicate_title_score, float,
+                                     "a number between 0 and 1", "thresholds."),
+        broad_ticket_areas=_typed(th_raw, "broad_ticket_areas",
+                                  defaults.thresholds.broad_ticket_areas, int,
+                                  "a whole number", "thresholds."),
+        tidy_flag_ratio=_typed(th_raw, "tidy_flag_ratio",
+                               defaults.thresholds.tidy_flag_ratio, float,
+                               "a number between 0 and 1", "thresholds."),
+        duplicate_report_limit=_typed(th_raw, "duplicate_report_limit",
+                                      defaults.thresholds.duplicate_report_limit, int,
+                                      "a whole number", "thresholds."),
+    )
+    sources = raw.get("spec_sources")
+    sections = raw.get("spec_sections")
+    return IntakeConfig(
+        tracker=str(raw.get("tracker") or defaults.tracker),
+        github=github,
+        spec_sources=[str(s) for s in (defaults.spec_sources if sources is None else sources)],
+        spec_sections=[str(s) for s in (defaults.spec_sections if sections is None else sections)],
+        thresholds=thresholds,
+    )
 
 
 def _parse_quality_commands(raw: Any) -> List[QualityCommand]:

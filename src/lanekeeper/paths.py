@@ -32,6 +32,8 @@ STATE_DIRNAME = "state"
 LOGS_DIRNAME = "logs"
 WORKTREES_DIRNAME = "worktrees"
 CAPABILITIES_DIRNAME = "capabilities"
+START_DIRNAME = "start"
+INTAKE_FILENAME = "intake.json"
 
 
 class InvalidHomeError(ValueError):
@@ -106,6 +108,21 @@ def worktrees_dir(root: Optional[Path] = None) -> Path:
 def capabilities_dir(root: Optional[Path] = None) -> Path:
     """Directory holding per-seat capability cards."""
     return home(root) / CAPABILITIES_DIRNAME
+
+
+def start_dir(root: Optional[Path] = None) -> Path:
+    """Directory holding what each step of `lanekeeper start` has decided.
+
+    Every step writes its result here before the next one runs, which is what makes
+    `start` resumable rather than restartable.
+    """
+    return home(root) / START_DIRNAME
+
+
+def intake_record_path(root: Optional[Path] = None) -> Path:
+    """The recorded result of step 1: is the work written down, and does it cover
+    the features."""
+    return start_dir(root) / INTAKE_FILENAME
 
 
 def _posix(*parts: str) -> str:
