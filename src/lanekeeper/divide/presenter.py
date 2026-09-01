@@ -51,17 +51,22 @@ def render(proposal: DivisionProposal, draft_file: str,
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_confirmation(report: ValidationReport, written: str = "") -> str:
+def render_confirmation(report: ValidationReport, written: str = "",
+                        policy: str = "") -> str:
     """What confirming said: either what was written, or what stopped it."""
     if report.ok:
         lines = [
             f"✅ Written down: {_groups(len(report.lanes))}, each with its own "
             "set of files.",
             "",
-            f"   The file is {written}. It is yours to edit from here — it is what I",
-            "   read from now on, so changing it changes who may touch what.",
-            "",
+            f"   The record is {written}. It is yours to edit from here.",
         ]
+        if policy:
+            lines += [
+                f"   The same groups are now the 'lanes' in {policy}, which is what",
+                "   'spawn', 'validate' and 'check' hold every agent to.",
+            ]
+        lines.append("")
         for lane in report.lanes:
             lines.append(f"     • {lane.name} — {_files(len(lane.paths))}")
         return "\n".join(lines).rstrip() + "\n"

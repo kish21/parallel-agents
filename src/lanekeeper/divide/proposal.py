@@ -7,26 +7,47 @@ in one command is how two halves of one answer come to disagree.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import Sequence
+from typing import Dict, List, Optional, Sequence
 
 from ..layout import tracked_files
-from .models import CodeSlice, DivisionProposal, ProposedLane
+from .advisor import Advisor, AdvisorError
+from .models import CodeSlice, DivisionProposal, PathSource, ProposedLane, TicketBoundary
 from . import boundary, codebase, collision, grouping
 
 
-def propose(root: Path, settings, intake_result, files: Sequence[str] = None
-            ) -> DivisionProposal:
+def propose(root: Path, settings, intake_result, files: Sequence[str] = None,
+            advisor: Optional[Advisor] = None,
+            board_lanes: Optional[Dict[str, str]] = None,
+            notes: Optional[List[str]] = None) -> DivisionProposal:
     """The whole of step 2's answer for one run.
 
     `files` is injectable so the tests can describe a repository without building one,
     and so this module never has to care that reading them means running git.
+
+    `board_lanes` maps a ticket number to the Lane set on the board. It outranks the
+    form's free-text field: a lane somebody chose from a list, on the board everyone
+    looks at, is a decision; the form field is a hint the form itself says to leave
+    blank when unsure.
+
+    `advisor` is asked about one thing only: a ticket that names no files and that
+    nothing in the code matches. Its answer is a suggestion, marked as such, that the
+    draft shows switched off. `notes` collects anything the advisor could not do, for
+    the caller to print — this module does not print.
     """
     listed = list(files) if files is not None else tracked_files(root)
     boundaries = boundary.read_all(intake_result.issues, settings)
+    if board_lanes:
+        boundaries = [
+            replace(b, declared_lane=board_lanes[b.ref]) if board_lanes.get(b.ref) else b
+            for b in boundaries
+        ]
     slices, code_note = codebase.slices(root, settings, files=listed)
 
     draft = grouping.proposal(boundaries, slices, settings, code_note=code_note)
+    if advisor is not None and draft.unplaced:
+        draft = _ask_advisor(draft, advisor, intake_result.issues, listed, notes)
 
     overlaps = collision.report(draft.lanes, listed, settings)
     wider = _wider_paths(draft.lanes, slices)
@@ -45,6 +66,35 @@ def propose(root: Path, settings, intake_result, files: Sequence[str] = None
         ticket_count=draft.ticket_count,
         code_note=draft.code_note,
     )
+
+
+def _ask_advisor(draft: DivisionProposal, advisor: Advisor, issues, files: Sequence[str],
+                 notes: Optional[List[str]]) -> DivisionProposal:
+    """Moves an unplaced ticket to "needs paths" when the advisor has a suggestion.
+
+    Only tickets nothing else could place are sent, and only paths that name something
+    in the project come back (the advisor filters its own answer). A suggestion is
+    stored with `PathSource.PROPOSED`, which the draft renders commented out with a
+    note saying nobody has confirmed it.
+    """
+    bodies = {str(i.ref): i for i in issues}
+    still_unplaced: List[TicketBoundary] = []
+    suggested: List[TicketBoundary] = list(draft.needs_paths)
+    for index, b in enumerate(draft.unplaced):
+        issue = bodies.get(b.ref)
+        try:
+            paths = advisor.propose_paths(b.ref, b.title, issue.body if issue else "", files)
+        except AdvisorError as exc:
+            # Said once, and the rest stay unplaced rather than being asked again.
+            if notes is not None:
+                notes.append(str(exc))
+            still_unplaced.extend(draft.unplaced[index:])
+            break
+        if paths:
+            suggested.append(replace(b, paths=tuple(paths), source=PathSource.PROPOSED))
+        else:
+            still_unplaced.append(b)
+    return replace(draft, needs_paths=tuple(suggested), unplaced=tuple(still_unplaced))
 
 
 def _wider_paths(lanes: Sequence[ProposedLane], slices: Sequence[CodeSlice]):

@@ -13,6 +13,7 @@ makes none.
 from __future__ import annotations
 
 import fnmatch
+from functools import lru_cache
 from typing import Dict, List, Sequence, Tuple
 
 from ..lanes import LaneEngine
@@ -139,18 +140,46 @@ def _walk(left: List[str], right: List[str]) -> bool:
 
 
 def _segment_may_match(left: str, right: str) -> bool:
-    """Whether one path segment could satisfy both patterns.
+    """Whether some string could satisfy both segment patterns.
 
-    A wildcard segment on either side matched against the other's literal text is the
-    honest test; two wildcard segments are assumed to intersect, because deciding
-    otherwise would need a language a glob does not have.
+    Walked character by character over both patterns at once, so two wildcard segments
+    are actually compared rather than assumed to collide. `carrier_*.py` and
+    `email_*.py` cannot both match one name — their literal prefixes disagree — and an
+    earlier version said they did, which made the project's own worked example
+    impossible to confirm. A character class is treated as `?`: it may match one
+    character, and over-reporting a collision is the safe side of that guess.
     """
-    left_wild = any(ch in left for ch in "*?[")
-    right_wild = any(ch in right for ch in "*?[")
-    if left_wild and right_wild:
+    return _common_string_exists(_class_to_question(left), _class_to_question(right))
+
+
+def _class_to_question(segment: str) -> str:
+    out, i = [], 0
+    while i < len(segment):
+        if segment[i] == "[":
+            close = segment.find("]", i + 1)
+            if close != -1:
+                out.append("?")
+                i = close + 1
+                continue
+        out.append(segment[i])
+        i += 1
+    return "".join(out)
+
+
+@lru_cache(maxsize=4096)
+def _common_string_exists(p: str, q: str) -> bool:
+    """Whether the two `*`/`?`/literal patterns share at least one matching string."""
+    if not p and not q:
         return True
-    if left_wild:
-        return fnmatch.fnmatchcase(right, left)
-    if right_wild:
-        return fnmatch.fnmatchcase(left, right)
-    return left == right
+    if not p:
+        return all(ch == "*" for ch in q)
+    if not q:
+        return all(ch == "*" for ch in p)
+    if p[0] == "*":
+        # The star produces nothing, or absorbs whatever q produces next.
+        return _common_string_exists(p[1:], q) or _common_string_exists(p, q[1:])
+    if q[0] == "*":
+        return _common_string_exists(p, q[1:]) or _common_string_exists(p[1:], q)
+    if p[0] == "?" or q[0] == "?" or p[0] == q[0]:
+        return _common_string_exists(p[1:], q[1:])
+    return False

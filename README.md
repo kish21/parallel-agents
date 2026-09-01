@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.6.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run multiple AI coding agents safely in the same repository.**
@@ -156,9 +156,28 @@ Where your work is read from is configuration, not an assumption. GitHub Issues 
 default; the section lives in `config.yaml` under `intake`, along with which documents
 describe your product and every threshold the check judges by.
 
-The rest of `start` — grouping the work, filling in the board, opening a window per agent
-— is being built. Until it lands, `init` below is the direct route if you already know
-how you want the work divided.
+When there is nothing written down and you are at a terminal, `start` does not stop at
+the advice: it opens Claude Code in the project with `/vision` as the opening prompt,
+waits for you to finish `/scope` and `/plan` there, and looks at the tickets again when
+you exit. `--no-handoff` keeps it to printing the steps.
+
+After the pre-flight, `start` proposes how the work divides and writes the proposal as a
+draft for you to edit; `lanekeeper divide --confirm` re-checks what you wrote and makes
+it the policy every agent is held to. `init` below is the direct route if you already
+know how you want the work divided.
+
+**The board.** `lanekeeper board` creates the GitHub project board with Lane, Owner and
+Seat fields, `lane:` labels and milestones, all generated from `config.yaml` so the board
+carries the same lane names the gate enforces. It needs `gh` with the `project` scope.
+`board --show` reads every card back. With `board.read: true` in the configuration, a
+card's Lane outranks the ticket form when the work is divided, and
+`lanekeeper spawn --ticket 12` takes the agent's lane and seat from the card.
+
+**The advisor.** Set `divide.advisor: claude-code` and, for a ticket that names no files
+and that nothing in the code matches, lanekeeper asks Claude Code headless (`claude -p`,
+on your own login, no API key) which files it probably touches. The answer is filtered to
+paths that exist and lands in the draft switched off for you to confirm. The gate never
+consults a model.
 
 ### 3. Initialize the Repository
 
@@ -725,11 +744,13 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
 | **`lanekeeper init`** | Initializes repository and creates configuration. The direct route if you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
-| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
+| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket` reads lane and seat from the board; `--open` opens the editor. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
 | **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. `--write-workflow` installs it in GitHub Actions. |
 | **`lanekeeper open`** | Opens an agent's worktree in the configured editor. |
+| **`lanekeeper board`** | Creates the GitHub project board (Lane, Owner, Seat, labels, milestones) from the configuration; `--show` reads the cards back. |
+| **`lanekeeper divide`** | Proposes how the work divides into a draft; `--confirm` re-checks your edits and writes the lanes into the policy. |
 | **`lanekeeper diff`** | Displays changed files classified as `[LANE OK]` vs. `[OUT-OF-LANE]`. |
 | **`lanekeeper inspect`** | Shows detailed agent metadata and environment variables. |
 | **`lanekeeper logs`** | Tails structured execution logs for an agent session. |

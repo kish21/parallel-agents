@@ -31,6 +31,7 @@ jobs:
       - name: Validate shell script syntax
         run: |
           bash -n bootstrap.sh
+          bash -n src/lanekeeper/scripts/bootstrap.sh
           bash -n templates/git-hooks/pre-push
           bash -n templates/git-hooks/pre-commit
 
