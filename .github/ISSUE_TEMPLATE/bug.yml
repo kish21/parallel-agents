@@ -7,19 +7,22 @@ body:
     attributes:
       value: |
         ### 🐛 Defect Report
-  - type: dropdown
+
+        A bug is as likely as a feature to be handed to an agent on its own, so this
+        form asks for **Allowed File Paths** too. Without them there is nothing for the
+        merge gate to enforce.
+
+  - type: input
     id: lane
     attributes:
-      label: Lane
-      options:
-        - interface
-        - service
-        - data
-        - platform
-        - docs/framework
-        - shared — needs a senior call
+      label: Lane (which feature this belongs to)
+      description: >-
+        A feature, top to bottom — not a technology layer: not "backend", not
+        "frontend", not "data". Leave it blank if you are not sure; lanekeeper reads
+        the backlog as a whole and proposes the grouping.
+      placeholder: "checkout"
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: owner
@@ -43,5 +46,20 @@ body:
     id: evidence
     attributes:
       label: Evidence / Error Output
+    validations:
+      required: true
+
+  - type: textarea
+    id: allowed_paths
+    attributes:
+      label: Allowed File Paths
+      description: >-
+        The files and directories fixing this is permitted to touch — **one path or
+        glob per line**. Your best estimate is fine; it is the boundary, not a
+        prediction. Give the narrowest set you are confident the fix stays inside;
+        it can be widened later, and a boundary that is too wide protects nobody.
+      placeholder: |
+        src/lanekeeper/intake/**
+        tests/test_intake_*.py
     validations:
       required: true
