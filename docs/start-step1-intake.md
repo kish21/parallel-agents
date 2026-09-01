@@ -124,7 +124,8 @@ handed.
 | Issues + a spec, every feature has tickets | `READY` | The count, the source it compared against, and that it will continue |
 | Issues + a spec, features with no ticket | `NEEDS_PLAYBOOK` | Exactly which features appear to have nothing written against them, and the offer to go back to the playbook |
 | Issues, nothing to compare against | `NEEDS_TIDYING`* | *"I count 12 pieces of work and I cannot tell whether that is all of them."* The counts and labels, and the user decides. |
-| The tracker cannot be read at all | `NEEDS_TIDYING` | Why, in plain words. Unreadable is not empty: telling someone to write down work they already have would be the worst possible wrong answer here. |
+| The project is not connected to a tracker at all | `NEEDS_PLAYBOOK` | That it is not connected, then the same playbook handoff. A repository that has never been pushed has no list of work for the same reason a brand-new one does: nobody has written it yet. |
+| The tracker cannot be read for any other reason | `NEEDS_TIDYING` | Why, in plain words. Unreadable is not empty: telling someone to write down work they already have would be the worst possible wrong answer here. |
 | Issues that exist but are unusable | `NEEDS_TIDYING` | Which tickets are missing a file/area hint, missing labels, look duplicated, or cover several features at once — plus the project's issue template if it has one |
 
 \* `CANNOT_JUDGE` is a stop-and-ask, not a refusal — refusing would make the tool
@@ -265,6 +266,7 @@ green; step 1 adds no import into any existing module's hot path.
 - **`gh` may be missing or unauthenticated.** That is an availability answer, not an
   error: the tracker reports why in plain words and step 1 falls to the "nothing to
   compare" path rather than crashing.
-- **Spec parsing is markdown-shaped.** A `PRODUCT.md` written differently yields few
-  features; the report says which file and which section it read, so a bad read is
-  visible rather than silent.
+- **Spec parsing is markdown-shaped.** A `PRODUCT.md` or README written differently
+  yields no features. The report names the documents it opened and the section headings
+  it was looking for, so a bad read is visible rather than reported as "there is nothing
+  here" — which is what it did on lanekeeper's own 31KB README before that was fixed.

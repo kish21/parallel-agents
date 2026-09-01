@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from ..trackers.base import IssueTracker, TrackerError
+from ..trackers.base import IssueTracker, TrackerError, TrackerNotConnectedError
 from . import coverage as coverage_module
 from . import quality, record
 from .models import (
@@ -59,6 +59,17 @@ def run_intake(
 
     try:
         issues = list(tracker.list_issues())
+    except TrackerNotConnectedError as exc:
+        # Not connected is not a failure. A repository that has never been pushed is the
+        # ordinary first day of a project: there is no list of work because nobody has
+        # written one yet, and the answer is the playbook, not an error.
+        return IntakeResult(
+            verdict=Verdict.NEEDS_PLAYBOOK,
+            issue_count=0,
+            coverage=CoverageReport(verdict=CoverageVerdict.CANNOT_JUDGE),
+            tracker_name=tracker.name,
+            tracker_note=str(exc),
+        )
     except TrackerError as exc:
         return IntakeResult(
             verdict=Verdict.NEEDS_TIDYING,
@@ -107,6 +118,7 @@ def _judge(issues: Sequence, spec: ProductSpec, thresholds, tracker_name: str,
     verdict, reasons = _verdict_for(report, flags, len(issues), thresholds)
 
     return IntakeResult(
+        spec_considered=spec.considered,
         verdict=verdict,
         issue_count=len(issues),
         coverage=report,

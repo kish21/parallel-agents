@@ -92,6 +92,51 @@ class TestNoWorkWrittenDown(StartTestCase):
         self.assertFalse(paths.config_path(self.root).exists())
 
 
+class TestAFreshLocalProject(StartTestCase):
+    """The case that matters most, and the one a stand-in tracker does not reproduce.
+
+    A brand-new repository has no remote, so the real tracker cannot reach GitHub at
+    all — it does not return an empty list, it fails. Reported as a failure, this sends
+    someone with an empty project off to fix their setup, when what they actually need
+    is to be pointed at the tool that writes the work down. Found by running the command
+    for real; the fake said everything was fine.
+    """
+
+    def run_with_real_tracker(self):
+        args = argparse.Namespace(take_as_is=False, fresh=False)
+        buffer = io.StringIO()
+        with in_dir(self.root), contextlib.redirect_stdout(buffer):
+            code = cli.cmd_start(args)
+        return code, buffer.getvalue()
+
+    def test_no_remote_is_the_playbook_handoff_not_an_error(self):
+        from lanekeeper.trackers.base import TrackerNotConnectedError
+        from lanekeeper.trackers.github_issues import CommandResult
+
+        def runner(argv):
+            if argv[1] == "auth":
+                return CommandResult(0, "", "")
+            return CommandResult(1, "", "no git remotes found")
+
+        original = cli.get_tracker
+        cli.get_tracker = lambda settings, root, r=None: __import__(
+            "lanekeeper.trackers.github_issues", fromlist=["GitHubIssuesTracker"]
+        ).GitHubIssuesTracker(settings.github, root, runner=runner)
+        try:
+            before = tree(self.root)
+            code, out = self.run_with_real_tracker()
+        finally:
+            cli.get_tracker = original
+
+        self.assertEqual(code, 1)
+        self.assertIn("not connected to GitHub", out)
+        self.assertIn("product-playbook", out)
+        for step in ("/vision", "/scope", "/plan"):
+            self.assertIn(step, out)
+        self.assertNotIn("could not read", out)
+        self.assertEqual(tree(self.root), before)
+
+
 class TestCoverage(StartTestCase):
     def test_reports_features_with_nothing_written_against_them(self):
         (self.root / "PRODUCT.md").write_text("## Scope\n- Checkout\n- Billing\n",

@@ -81,11 +81,21 @@ def _unreadable(result: IntakeResult) -> str:
 
 
 def _nothing_written_down(result: IntakeResult) -> str:
+    """No work to share out — either none was written, or this project has no tracker.
+
+    Both land here on purpose. A repository that has never been pushed anywhere has no
+    list of work for the same reason a brand-new one does: nobody has written it yet.
+    The note says which of the two it was, and the advice is the same either way.
+    """
     steps = "  then  ".join(PLAYBOOK_STEPS)
-    return (
+    opening = (
+        f"🛑 {result.tracker_note}\n\n" if result.tracker_note else
         "🛑 There is no written-down work in this project yet, so there is nothing\n"
         "   to share out between agents.\n\n"
-        "   That is the normal starting point, and it is not my job to invent what\n"
+    )
+    return (
+        opening
+        + "   That is the normal starting point, and it is not my job to invent what\n"
         "   your product should do. Its companion tool, product-playbook, is built\n"
         "   for exactly this: it works out what you are building, what the first\n"
         "   version includes, and turns that into a list of tickets.\n\n"
@@ -113,9 +123,10 @@ def _coverage_lines(result: IntakeResult) -> List[str]:
     if cov.verdict is CoverageVerdict.CANNOT_JUDGE:
         lines = [
             f"   I count {_count(result.issue_count)} and I cannot tell whether that is",
-            "   all of them, because this project has nothing written down that says",
-            "   what it is meant to do. I am not going to guess.",
+            "   all of them, because I have nothing to compare them against that says",
+            "   what this product is meant to do. I am not going to guess.",
         ]
+        lines += _where_i_looked(result)
         if result.label_counts:
             shown = ", ".join(f"{name} ({n})" for name, n in result.label_counts[:6])
             lines.append(f"   How they are labelled: {shown}")
@@ -137,6 +148,23 @@ def _coverage_lines(result: IntakeResult) -> List[str]:
     ]
     lines += [f"     • {feature.name}" for feature in cov.uncovered]
     return lines
+
+
+def _where_i_looked(result: IntakeResult) -> List[str]:
+    """Which documents were opened and found wanting.
+
+    "I have nothing to compare against" and "I read your README and it does not list
+    what this product does" are different sentences, and only the second one tells the
+    user what would fix it. Saying the first while having done the second is the kind of
+    quietly-wrong report this whole step exists to avoid.
+    """
+    if not result.spec_considered:
+        return []
+    read = ", ".join(result.spec_considered)
+    return [
+        f"   I read {read}, and could not find a list in there of what this",
+        "   product does — a section headed Scope, Plan or Features is what I look for.",
+    ]
 
 
 def _describe_source(source: SpecSource, path) -> str:

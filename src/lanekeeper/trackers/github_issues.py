@@ -17,7 +17,13 @@ import subprocess
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
-from .base import AvailabilityReport, IssueTracker, TrackedIssue, TrackerError
+from .base import (
+    AvailabilityReport,
+    IssueTracker,
+    TrackedIssue,
+    TrackerError,
+    TrackerNotConnectedError,
+)
 
 #: A command runner takes an argv list and returns (exit_code, stdout, stderr).
 CommandRunner = Callable[[Sequence[str]], "CommandResult"]
@@ -101,9 +107,15 @@ class GitHubIssuesTracker(IssueTracker):
             raise TrackerError(f"Could not run '{' '.join(argv)}': {exc}") from exc
 
         if res.returncode != 0:
+            detail = res.stderr.strip()
+            if _means_not_connected(detail):
+                raise TrackerNotConnectedError(
+                    "This project is not connected to GitHub yet, so there are no "
+                    "tickets there for me to read."
+                )
             raise TrackerError(
                 "Reading the issue list from GitHub failed: "
-                + (res.stderr.strip() or f"'{' '.join(argv)}' exited {res.returncode}")
+                + (detail or f"'{' '.join(argv)}' exited {res.returncode}")
             )
 
         return _parse_issues(res.stdout)
@@ -123,6 +135,21 @@ class GitHubIssuesTracker(IssueTracker):
         if s.repo:
             argv += ["--repo", s.repo]
         return argv
+
+
+#: What `gh` says when the directory is not a GitHub project at all. A local repository
+#: that has never been pushed is the ordinary first day of a project, not a failure.
+_NOT_CONNECTED = (
+    "no git remotes found",
+    "none of the git remotes configured for this repository",
+    "could not resolve to a repository",
+    "not a git repository",
+)
+
+
+def _means_not_connected(stderr: str) -> bool:
+    lowered = (stderr or "").lower()
+    return any(marker in lowered for marker in _NOT_CONNECTED)
 
 
 def _parse_issues(raw: str) -> List[TrackedIssue]:

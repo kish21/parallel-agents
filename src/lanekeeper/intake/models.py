@@ -107,6 +107,11 @@ class IntakeResult:
     tracker_available: bool = True
     tracker_note: str = ""
     label_counts: Tuple[Tuple[str, int], ...] = ()
+    #: Which documents were opened looking for a description of the product. Reported
+    #: even when none of them yielded one: "I found nothing" and "I looked in your
+    #: README and it does not list what this product does" are different sentences, and
+    #: only the second tells the user what to do about it.
+    spec_considered: Tuple[str, ...] = ()
     #: Why the run stopped, in plain language, when the reason is not visible from the
     #: coverage report alone — a backlog too small to divide, or too many unclear
     #: tickets. A stop the user cannot see the reason for is indistinguishable from a

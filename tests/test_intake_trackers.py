@@ -13,7 +13,7 @@ from lanekeeper.trackers import (
     UnknownTrackerError,
     get_tracker,
 )
-from lanekeeper.trackers.base import TrackerError
+from lanekeeper.trackers.base import TrackerError, TrackerNotConnectedError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _intake_fakes import RecordingRunner  # noqa: E402
@@ -114,10 +114,25 @@ class TestGitHubIssuesTracker(unittest.TestCase):
         self.assertTrue(self._tracker(runner).is_available().available)
 
     def test_a_failed_read_raises_rather_than_reporting_no_work(self):
-        runner = RecordingRunner({"issue": (1, "", "could not resolve to a Repository")})
+        runner = RecordingRunner({"issue": (1, "", "HTTP 503: service unavailable")})
         with self.assertRaises(TrackerError) as ctx:
             self._tracker(runner).list_issues()
-        self.assertIn("could not resolve", str(ctx.exception))
+        self.assertIn("503", str(ctx.exception))
+        self.assertNotIsInstance(ctx.exception, TrackerNotConnectedError)
+
+    def test_a_project_with_no_remote_is_not_connected_rather_than_broken(self):
+        # A repository that has never been pushed is the ordinary first day of a
+        # project. Reporting it as a failure sends the user to fix their setup when
+        # what they actually need is to write the work down.
+        for stderr in ("no git remotes found",
+                       "none of the git remotes configured for this repository "
+                       "point to a known GitHub host",
+                       "could not resolve to a Repository with the name 'x/y'"):
+            with self.subTest(stderr=stderr):
+                runner = RecordingRunner({"issue": (1, "", stderr)})
+                with self.assertRaises(TrackerNotConnectedError) as ctx:
+                    self._tracker(runner).list_issues()
+                self.assertIn("not connected to GitHub", str(ctx.exception))
 
     def test_unreadable_output_raises(self):
         runner = RecordingRunner({"issue": (0, "not json", "")})

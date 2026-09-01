@@ -20,6 +20,16 @@ class TrackerError(RuntimeError):
     """Raised when a tracker that reported itself available then failed to read."""
 
 
+class TrackerNotConnectedError(TrackerError):
+    """The project is not connected to this tracker at all.
+
+    Different from a failure, and the difference matters: there is no list of work
+    because the project has never had one, which is the ordinary starting point for a
+    brand-new project, not a fault to report. A person here needs to be pointed at the
+    tool that writes work down, not told that something went wrong.
+    """
+
+
 @dataclass(frozen=True)
 class TrackedIssue:
     """One piece of written-down work, in the only shape lanekeeper needs.
