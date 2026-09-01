@@ -130,10 +130,17 @@ class EnvironmentManager:
             for k, v in sorted(env_vars.items()):
                 f.write(f"{sanitize_env_key(k)}={shell_quote(v)}\n")
 
-        # 2. Write .lane file (seat & role declaration for AI agents)
+        # 2. Write .lane file (seat & role declaration for AI agents). It also carries
+        #    the boundary itself, so an agent told "read .lane" learns which paths it may
+        #    touch without being handed the whole configuration.
+        lane = self.config.lanes.get(agent.lane)
         lane_file = worktree_path / ".lane"
         with open(lane_file, "w", encoding="utf-8") as f:
             f.write(f"SEAT={shell_quote(agent.seat)}\n")
             f.write(f"ROLE={shell_quote(agent.seat.lower())}\n")
             f.write(f"LANE={shell_quote(agent.lane)}\n")
             f.write(f"AGENT_ID={shell_quote(agent.id)}\n")
+            f.write(f"TASK={shell_quote(agent.task)}\n")
+            if lane is not None:
+                f.write(f"ALLOW={shell_quote(' '.join(lane.allow))}\n")
+                f.write(f"DENY={shell_quote(' '.join(lane.deny))}\n")

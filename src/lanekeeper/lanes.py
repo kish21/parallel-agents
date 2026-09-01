@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import fnmatch
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import List, Optional
 from .config import LaneConfig
 from . import paths
@@ -15,7 +14,7 @@ from . import paths
 @dataclass
 class LaneViolation:
     filepath: str
-    reason: str  # "denied" or "not_allowed"
+    reason: str  # "denied", "not_allowed" or "policy"
     matched_pattern: Optional[str] = None
 
 
@@ -83,6 +82,13 @@ class LaneEngine:
         norm_pattern = pattern.replace("\\", "/").lstrip("/")
         norm_path = path_str.replace("\\", "/").strip("/")
 
+        # A pattern written as a directory — `secrets/` — means everything under it.
+        # Previously it matched nothing at all in a lane, while the capability gates
+        # expanded the same spelling to `secrets/**`, so a deny written the natural way
+        # was a silent no-op in one half of the tool and enforced in the other.
+        if norm_pattern.endswith("/"):
+            norm_pattern = norm_pattern + "**"
+
         if norm_pattern == norm_path:
             return True
 
@@ -92,9 +98,34 @@ class LaneEngine:
 
         return bool(cls._compile(norm_pattern).match(norm_path))
 
+    #: Files lanekeeper itself writes into every worktree. They are ignored by git and
+    #: carry no work, so they never count against a lane.
+    RUNTIME_FILES = (".env", ".lane")
+
+    @classmethod
+    def is_bookkeeping(cls, filepath: str | Path) -> bool:
+        """Whether a path is runtime state rather than work, and so outside any lane."""
+        norm = cls.normalize_path(filepath)
+        return norm in cls.RUNTIME_FILES or any(
+            norm.startswith(p) for p in paths.ignored_prefixes())
+
+    @classmethod
+    def is_policy(cls, filepath: str | Path) -> bool:
+        """Whether a path defines the lanes themselves. No lane may touch it."""
+        norm = cls.normalize_path(filepath)
+        for p in paths.policy_paths():
+            if norm == p or (p.endswith("/") and norm.startswith(p)):
+                return True
+        return False
+
     @classmethod
     def check_file(cls, filepath: str | Path, lane: LaneConfig) -> Optional[LaneViolation]:
         path_str = cls.normalize_path(filepath)
+
+        # 0. The policy is not subject to the policy: it is denied to every lane, before
+        #    an `allow` as wide as `**` gets a say.
+        if cls.is_policy(path_str):
+            return LaneViolation(filepath=path_str, reason="policy", matched_pattern=None)
 
         # 1. Check explicit Deny patterns first
         for deny_pat in lane.deny:
@@ -126,13 +157,9 @@ class LaneEngine:
         allowed: List[str] = []
         violations: List[LaneViolation] = []
 
-        # Built-in internal files to ignore
-        ignored_prefixes = paths.ignored_prefixes()
-        ignored_exact = (".env", ".lane", ".gitignore")
-
         for f in files:
             norm_f = cls.normalize_path(f)
-            if any(norm_f.startswith(p) for p in ignored_prefixes) or norm_f in ignored_exact:
+            if cls.is_bookkeeping(norm_f):
                 continue
 
             violation = cls.check_file(norm_f, lane)

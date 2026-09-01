@@ -205,6 +205,19 @@ class DivideConfig:
 
 
 @dataclass
+class EditorConfig:
+    """The command that opens an agent's worktree for a person to work in.
+
+    `code` because Visual Studio Code is the common case and its command opens a folder
+    as a window. Anything that accepts a directory as its last argument works: `cursor`,
+    `subl`, `idea`. `args` go between the command and the path.
+    """
+
+    command: str = "code"
+    args: List[str] = field(default_factory=list)
+
+
+@dataclass
 class GitConfig:
     protected_branches: List[str] = field(default_factory=lambda: ["main", "master"])
     branch_prefix: str = "parallel/"
@@ -225,6 +238,7 @@ class Config:
     capability_gates: Dict[str, CapabilityGate] = field(default_factory=dict)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     divide: DivideConfig = field(default_factory=DivideConfig)
+    editor: EditorConfig = field(default_factory=EditorConfig)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -348,6 +362,10 @@ class Config:
                 "host": self.environment.host,
                 "url_templates": dict(self.environment.url_templates),
             },
+            "editor": {
+                "command": self.editor.command,
+                "args": list(self.editor.args),
+            },
             "intake": {
                 "tracker": self.intake.tracker,
                 "github": {
@@ -401,23 +419,16 @@ class Config:
         # fully-defaulted one, so an existing project keeps working untouched.
         intake_data = data.get("intake", {}) or {}
         divide_data = data.get("divide", {}) or {}
+        editor_data = data.get("editor", {}) or {}
 
         lanes = {}
         if isinstance(lanes_data, list):
             for l_item in lanes_data:
-                l_name = l_item.get("name", "unknown")
-                lanes[l_name] = LaneConfig(
-                    name=l_name,
-                    allow=l_item.get("allow", []),
-                    deny=l_item.get("deny", []),
-                )
+                l_name = str((l_item or {}).get("name", "unknown"))
+                lanes[l_name] = _parse_lane(l_name, l_item)
         elif isinstance(lanes_data, dict):
             for l_name, l_item in lanes_data.items():
-                lanes[l_name] = LaneConfig(
-                    name=l_name,
-                    allow=l_item.get("allow", []),
-                    deny=l_item.get("deny", []),
-                )
+                lanes[str(l_name)] = _parse_lane(str(l_name), l_item)
 
         port_ranges = {}
         for p_name, p_val in ports_data.items():
@@ -458,7 +469,59 @@ class Config:
             },
             intake=_parse_intake(intake_data),
             divide=_parse_divide(divide_data),
+            editor=EditorConfig(
+                command=str(editor_data.get("command") or "code"),
+                args=[str(a) for a in (editor_data.get("args") or [])],
+            ),
         )
+
+
+#: The lane name `check` uses for a change to the policy files. Not declarable.
+RESERVED_LANE_NAME = "policy"
+
+
+class InvalidLaneError(ValueError):
+    """Raised when a lane in the configuration cannot bound anything.
+
+    A lane with no ``allow`` patterns used to pass every file: the engine skips the
+    allow check when the list is empty, so ``allow: []`` or ``allow: null`` was the
+    widest possible lane, written in a way that looks like the narrowest. The README
+    promises no permissive fallback; the loader now keeps that promise.
+    """
+
+
+def _patterns(lane_name: str, key: str, raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': '{key}' must be a list of patterns, one per line, "
+            f"not the single string {raw!r}.")
+    if not isinstance(raw, list):
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': '{key}' must be a list of patterns "
+            f"(found {type(raw).__name__}).")
+    patterns = [str(p).strip() for p in raw if p is not None and str(p).strip()]
+    return patterns
+
+
+def _parse_lane(lane_name: str, raw: Any) -> LaneConfig:
+    if not isinstance(raw, dict):
+        raise InvalidLaneError(
+            f"Lane '{lane_name}' must be a mapping with 'allow' and 'deny' lists "
+            f"(found {type(raw).__name__}).")
+    if lane_name == RESERVED_LANE_NAME:
+        raise InvalidLaneError(
+            f"'{RESERVED_LANE_NAME}' is the name `lanekeeper check` reserves for a change to "
+            f"the lane policy itself, so it cannot also be a lane. Choose another name.")
+    allow = _patterns(lane_name, "allow", raw.get("allow"))
+    deny = _patterns(lane_name, "deny", raw.get("deny"))
+    if not allow:
+        raise InvalidLaneError(
+            f"Lane '{lane_name}' allows nothing. A lane with no 'allow' patterns would "
+            f"pass every file, so it is refused rather than read as permissive. Name "
+            f"the paths this lane owns, or remove the lane.")
+    return LaneConfig(name=lane_name, allow=allow, deny=deny)
 
 
 class InvalidIntakeSettingError(ValueError):

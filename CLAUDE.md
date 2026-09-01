@@ -84,11 +84,11 @@ Design doc: [`docs/ticket-template.md`](docs/ticket-template.md).
 |---|---|---|---|
 | 1 | Is the work written down, and does it cover the features? | #37 | **done — PR #45, merged** |
 | 2 | Divide the work: group where it groups, otherwise ask which tickets to hand out | #38 | **done — PR #47, open** |
-| 3 | Separate a dependency from a collision; fuse or share | #39 | **next** |
-| 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | not started |
+| 3 | Separate a dependency from a collision; fuse or share | #39 | **frozen** — see the later session below |
+| 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | **next** — `bootstrap.sh` exists, unwired |
 | 5 | Ask how many agents exist and how many to activate now | #33 | not started |
-| 6 | Prepare a desk per activated agent | #41 | not started |
-| 7 | Enforce the boundary on every change (`check`, the PR gate) | #31, #32 | not started |
+| 6 | Prepare a desk per activated agent | #41 | **done** — `open`, `spawn --open` |
+| 7 | Enforce the boundary on every change (`check`, the PR gate) | #31, #32 | **done** — `check --write-workflow` |
 
 ---
 
@@ -154,50 +154,57 @@ residue, and a test asserts they are **not** invented.
 
 ---
 
-## NEXT SESSION PLAN — #39, step 3: dependency or collision?
+## Session of 2026-09-01 (later the same day): the review, and the re-ordering
 
-**How to resume**
+A thorough review of the code (three subsystem reviews plus probes against real
+repositories) reached one verdict: **the idea is right; the build order was wrong.** The
+enforcement core had five fail-open holes, nothing ran `validate` automatically, and the
+guided path was three steps of heuristics away from anything a user could see.
 
-1. `git checkout main && git pull` — PR #47 should be merged first.
-2. Read `docs/start-step2-divide.md` §5 (what step 2 already answers) and the #39 issue.
-3. Step 3 is handed a `DivisionProposal` (`lanekeeper.divide.models`) whose `overlaps`
-   are already computed. **Do not re-run the mechanical check** — extend it.
-4. Write `docs/start-step3-collisions.md` before coding, and confirm it.
+**Fixed this session** (`tests/test_gate_holes.py` reproduces each escape first):
 
-**What #38 already did that #39 was going to**
+- A rename out of another lane reported only its destination → both sides reported,
+  `--no-renames` on the diff.
+- A base branch git could not diff produced an empty change list → `GitError`, and
+  `validate`/`check` fail with "nothing was checked".
+- `.lanekeeper/` was wholly exempt, including `config.yaml` and the cards → only the
+  runtime subdirs are exempt (`paths.ignored_prefixes`); the policy files are
+  `paths.policy_paths()` and denied to every lane (`LaneViolation.reason == "policy"`).
+- `allow: []` allowed everything → `InvalidLaneError` at load.
+- `secrets/` matched nothing in a lane → a trailing slash means `/**` in `match_glob`.
+- `state._read_json` read a damaged ledger as empty → `StateCorruptError`, caught once
+  in `main()`. The id counter is still lenient (it is reconciled against state).
+- `cleanup` ignored the `y` answer → `y` now means `--force`.
 
-The mechanical half is done and shipped: `divide.collision` reports whether two entries
-touch the same files, with the file that proves it, and marks the weaker
-`patterns-only` case as weaker. `deny` and shared zones are honoured. #39 keeps the
-question that is actually hard: **is an overlap a dependency or a collision, and is the
-answer to fuse the two entries or to declare a shared zone with a steward?**
+**Built this session:**
 
-**Two things this session found and left for #39**
+- `lanekeeper check` (`src/lanekeeper/check.py`) — the lane engine as a PR gate: a lane
+  name or `--labels-json`, a base ref, no agent state. `--write-workflow` writes
+  `.github/workflows/lanekeeper-gate.yml`, which reads a `lane: <name>` label and fails
+  closed without exactly one. `policy` is a reserved lane name: a change under it may
+  touch only the policy files. **This is step 7 (#31/#32), done first because it is
+  the product.**
+- `lanekeeper open` and `spawn --open` (`src/lanekeeper/desk.py`) — the desk (#41).
+  `editor.command` in config, default `code`. `.lane` now carries `TASK`, `ALLOW`, `DENY`.
 
-- `collision._answered_by` is approximate: a `deny` or shared pattern intersecting both
-  sides is taken to cover the region they share. It only ever suppresses the structural
-  finding, never one proved by a real file, and it is documented as approximate — but
-  #39 owns the exact answer if it needs one.
-- The `wider_paths` offer (a ticket named files one by one; the area they sit in is
-  offered as commented lines) is the seam where "fuse or share" would naturally be
-  proposed.
+**The new order, decided with the user:**
 
-**Constraints that carry over**
+1. ~~Gate holes~~ done. 2. ~~`check` in CI~~ done. 3. ~~Editor launch~~ done.
+4. **Next: the board as the source of truth (#40, and `bootstrap.sh`).** `bootstrap.sh`
+   already creates the board with Lane, Owner and Seat fields and the `lane:` labels; it
+   is an orphan no command calls, and its `bootstrap.conf.example` still uses the layer
+   lanes. Wire it in: `lanekeeper board` (or `start`) runs it, and lanekeeper reads Lane
+   and Seat from the board fields rather than parsing them out of issue bodies.
+5. **Frozen: `divide` and the coverage half of `intake`.** Not deleted, not developed.
+   Product-playbook writes the tickets grouped by module; the user sets the Lane field on
+   the board; lanekeeper reads it. Step 3 (#39) is not built. The `lanes.yaml` that
+   `divide --confirm` writes is read by nothing; the confirmation message claims
+   otherwise and should be corrected when the board work lands.
 
-- **The gate never calls a model.** `divide.advisor` exists, defaults to `none`, and any
-  other value fails the config load. Keep it that way.
-- **Never tell the user to restructure their repository.** Guarded by
-  `test_divide_language.py::test_no_case_tells_the_user_to_rearrange_their_project`.
-- Plain language in every user-facing string; the vocabulary guard covers every rendered
-  case and treats a file name as a name, not a word.
-- `check` is #31's name. `divide` is step 2's.
-- No hardcoding: word lists, headings, thresholds and paths are all config, and the two
-  configured paths are checked to stay inside the project.
+**Blockers:** none. This branch (`claude/parallel-agent-review-ut6ec8`) needs a PR.
 
-**Blockers:** PR #47 must merge first.
-
-**Known local noise:** `test_ports` (×2) and `test_cleanup` fail on this Windows machine
-on port-allocation assertions. Confirmed pre-existing on clean `main`; CI's
+**Known local noise:** `test_ports` (×2) and `test_cleanup` fail on the user's Windows
+machine on port-allocation assertions. Confirmed pre-existing on clean `main`; CI's
 windows-latest is green. Not a regression — do not chase it.
 
 ---

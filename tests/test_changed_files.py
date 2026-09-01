@@ -125,12 +125,13 @@ class TestPorcelainParser(unittest.TestCase):
     def test_untracked(self):
         self.assertEqual(self.parse("?? src/new.py\0"), ["src/new.py"])
 
-    def test_rename_skips_the_source_path(self):
-        self.assertEqual(self.parse("R  src/new.py\0src/old.py\0"), ["src/new.py"])
+    def test_rename_reports_both_paths(self):
+        """The source was deleted, and a deletion is a change to that file."""
+        self.assertEqual(self.parse("R  src/new.py\0src/old.py\0"), ["src/new.py", "src/old.py"])
 
     def test_mixed_entries(self):
         raw = " M a.py\0?? b.py\0R  d.py\0c.py\0 D e.py\0"
-        self.assertEqual(self.parse(raw), ["a.py", "b.py", "d.py", "e.py"])
+        self.assertEqual(self.parse(raw), ["a.py", "b.py", "d.py", "c.py", "e.py"])
 
     def test_empty_and_short_entries_are_ignored(self):
         self.assertEqual(self.parse(""), [])
