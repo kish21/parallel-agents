@@ -125,6 +125,18 @@ def intake_record_path(root: Optional[Path] = None) -> Path:
     return start_dir(root) / INTAKE_FILENAME
 
 
+def divide_draft_path(root: Optional[Path] = None,
+                      relative: str = "start/lanes.draft.yaml") -> Path:
+    """The proposed division of the work, written for the user to edit.
+
+    A draft rather than the real lane file: step 2 proposes and the user confirms, so
+    what it writes must be somewhere that carries no authority. `relative` comes from
+    the configuration rather than from here, because where a project keeps its draft is
+    the project's business; the default is stated at the call site's dataclass.
+    """
+    return home(root) / Path(relative)
+
+
 def _posix(*parts: str) -> str:
     """Join with forward slashes, for text shown to users or written to files."""
     return "/".join(parts)

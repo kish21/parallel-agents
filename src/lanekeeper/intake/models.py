@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Tuple
 
+from ..trackers.base import TrackedIssue
+
 
 class SpecSource(Enum):
     """What the issues were compared against, in order of preference."""
@@ -124,6 +126,14 @@ class IntakeResult:
     accepted_as_is: bool = False
     #: Set when a previous run's record was reused instead of being recomputed.
     resumed: bool = field(default=False, compare=False)
+    #: The tickets step 1 actually read. Step 2 needs the bodies — that is where a
+    #: ticket states which files it touches — and must not go back to the tracker for
+    #: them, because two reads of a live backlog can disagree.
+    #:
+    #: Runtime only: never written to the record, and re-attached from the live listing
+    #: on a resumed run. A resumed step 2 therefore divides today's tickets rather than
+    #: a snapshot of the ones a previous run happened to see.
+    issues: Tuple[TrackedIssue, ...] = field(default=(), compare=False, repr=False)
 
     @property
     def passed(self) -> bool:

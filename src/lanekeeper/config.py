@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 import yaml
 from . import paths
@@ -117,7 +117,12 @@ class IntakeThresholds:
     thin_issue_count: int = 3        # fewer tickets than this reads as thin
     feature_match_score: float = 0.5  # share of a feature's words a ticket must carry
     duplicate_title_score: float = 0.85
-    broad_ticket_areas: int = 3      # distinct code areas one ticket may name
+    #: Distinct top-level directories one ticket may name before it reads as several
+    #: pieces of work. It was 3, which is exactly what a correctly written feature
+    #: slice spans (backend, frontend, tests) — so the default flagged the very model
+    #: the ticket form now teaches. A slice that also touches docs or a migrations
+    #: root reaches five; past that it really is several tickets. See #38.
+    broad_ticket_areas: int = 5
     tidy_flag_ratio: float = 0.5     # share of flagged tickets that stops the run
     duplicate_report_limit: int = 10  # closest near-duplicate pairs worth showing
 
@@ -140,6 +145,66 @@ class IntakeConfig:
 
 
 @dataclass
+class DivideThresholds:
+    """The numbers step 2 divides by, kept out of the code that applies them.
+
+    Every one of them is a judgement about somebody else's repository, which is the
+    definition of a setting rather than a constant.
+    """
+
+    min_group_tickets: int = 2       # tickets sharing a feature name before it is a group
+    min_slice_files: int = 2         # files under a directory before it counts as one
+    min_slice_roots: int = 2         # top-level roots a name must appear under
+    overlap_report_limit: int = 20   # most overlapping pairs worth printing
+    unclaimed_examples: int = 5      # example unclaimed files worth naming
+
+
+@dataclass
+class DivideConfig:
+    """Step 2 of `lanekeeper start`: how the written-down work is divided up.
+
+    See docs/start-step2-divide.md. The word lists are what stop a feature name being
+    read out of a directory that names a technology layer, and they are settable because
+    no fixed list is right for every repository.
+    """
+
+    #: The only implemented value. It exists so that when an advisor is added it arrives
+    #: switched off: the division is a mechanical answer, and an answer that changes
+    #: between runs would not be one.
+    advisor: str = "none"
+    #: Relative to lanekeeper's own directory.
+    draft_path: str = "start/lanes.draft.yaml"
+    #: Relative to the repository root. The confirmed file, checked in and hand-edited.
+    lane_file: str = "lanes.yaml"
+    #: The heading a ticket states its boundary under, as the issue form labels it.
+    #: Matched as a prefix, case-insensitively, so "Allowed File Paths (globs)" counts.
+    #: Settable because a project whose form words the field differently should not have
+    #: to rename the field to be understood.
+    path_headings: List[str] = field(default_factory=lambda: ["allowed file paths"])
+    #: The heading carrying the ticket's own feature name, when the filer gave one.
+    lane_headings: List[str] = field(default_factory=lambda: ["lane"])
+    #: Directories that hold code but never name a feature.
+    containers: List[str] = field(default_factory=lambda: [
+        "src", "app", "apps", "packages", "modules", "lib", "libs", "cmd", "internal",
+        "backend", "frontend", "web", "client", "server", "api", "services", "service",
+        "tests", "test", "spec", "docs", "scripts", "infra", "infrastructure", "deploy",
+    ])
+    #: Buckets that group by kind rather than by feature.
+    generic_dirs: List[str] = field(default_factory=lambda: [
+        "components", "component", "pages", "page", "views", "routes", "hooks", "utils",
+        "util", "helpers", "schemas", "schema", "models", "model", "db", "database",
+        "migrations", "static", "assets", "styles", "types", "config", "common",
+        "shared", "core", "domains", "features", "providers", "adapters", "handlers",
+        "controllers", "middleware", "public", "templates",
+    ])
+    #: Directories whose children are features by construction.
+    feature_containers: List[str] = field(default_factory=lambda: [
+        "domains", "features", "modules", "packages", "apps",
+    ])
+    thresholds: DivideThresholds = field(default_factory=DivideThresholds)
+
+
+@dataclass
 class GitConfig:
     protected_branches: List[str] = field(default_factory=lambda: ["main", "master"])
     branch_prefix: str = "parallel/"
@@ -159,6 +224,7 @@ class Config:
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     capability_gates: Dict[str, CapabilityGate] = field(default_factory=dict)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
+    divide: DivideConfig = field(default_factory=DivideConfig)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -301,6 +367,23 @@ class Config:
                     "duplicate_report_limit": self.intake.thresholds.duplicate_report_limit,
                 },
             },
+            "divide": {
+                "advisor": self.divide.advisor,
+                "draft_path": self.divide.draft_path,
+                "lane_file": self.divide.lane_file,
+                "path_headings": list(self.divide.path_headings),
+                "lane_headings": list(self.divide.lane_headings),
+                "containers": list(self.divide.containers),
+                "generic_dirs": list(self.divide.generic_dirs),
+                "feature_containers": list(self.divide.feature_containers),
+                "thresholds": {
+                    "min_group_tickets": self.divide.thresholds.min_group_tickets,
+                    "min_slice_files": self.divide.thresholds.min_slice_files,
+                    "min_slice_roots": self.divide.thresholds.min_slice_roots,
+                    "overlap_report_limit": self.divide.thresholds.overlap_report_limit,
+                    "unclaimed_examples": self.divide.thresholds.unclaimed_examples,
+                },
+            },
         }
 
     @classmethod
@@ -317,6 +400,7 @@ class Config:
         # Absent from every configuration written before v0.7. A missing section is a
         # fully-defaulted one, so an existing project keeps working untouched.
         intake_data = data.get("intake", {}) or {}
+        divide_data = data.get("divide", {}) or {}
 
         lanes = {}
         if isinstance(lanes_data, list):
@@ -373,6 +457,7 @@ class Config:
                 for name, spec in gates_data.items()
             },
             intake=_parse_intake(intake_data),
+            divide=_parse_divide(divide_data),
         )
 
 
@@ -389,14 +474,28 @@ class InvalidIntakeSettingError(ValueError):
         )
 
 
-def _typed(raw: Dict[str, Any], key: str, default, caster, expected: str, prefix: str):
+class InvalidDivideSettingError(ValueError):
+    """Raised when a value in the `divide` section cannot be used as written.
+
+    Same reason as its intake counterpart: `start` is the first command a new user runs,
+    and a traceback out of it is not a message.
+    """
+
+    def __init__(self, key: str, value, expected: str):
+        super().__init__(
+            f"divide.{key} must be {expected}, but the configuration says {value!r}."
+        )
+
+
+def _typed(raw: Dict[str, Any], key: str, default, caster, expected: str, prefix: str,
+           error=InvalidIntakeSettingError):
     """One configured value, defaulted when absent and explained when unusable."""
     if key not in raw or raw[key] is None:
         return default
     try:
         return caster(raw[key])
     except (TypeError, ValueError):
-        raise InvalidIntakeSettingError(f"{prefix}{key}", raw[key], expected) from None
+        raise error(f"{prefix}{key}", raw[key], expected) from None
 
 
 def _parse_intake(raw: Dict[str, Any]) -> IntakeConfig:
@@ -447,6 +546,88 @@ def _parse_intake(raw: Dict[str, Any]) -> IntakeConfig:
         spec_sections=[str(s) for s in (defaults.spec_sections if sections is None else sections)],
         thresholds=thresholds,
     )
+
+
+def _parse_divide(raw: Dict[str, Any]) -> DivideConfig:
+    """Builds the divide section, defaulting every value that is absent.
+
+    Absent from every configuration written before v0.7, so a missing section is a fully
+    defaulted one. An explicitly empty word list is honoured: a user who wants every
+    directory name treated as a feature name is entitled to say so.
+    """
+    defaults = DivideConfig()
+    th_raw = raw.get("thresholds", {}) or {}
+
+    advisor = str(raw.get("advisor") or defaults.advisor)
+    if advisor != "none":
+        # There is no advisor. Accepting the setting and ignoring it would promise a
+        # behaviour that does not exist, which is the defect this project keeps fixing.
+        raise InvalidDivideSettingError(
+            "advisor", raw.get("advisor"),
+            "'none' — dividing the work is a mechanical answer, and no other advisor "
+            "is implemented",
+        )
+
+    thresholds = DivideThresholds(
+        min_group_tickets=_typed(th_raw, "min_group_tickets",
+                                 defaults.thresholds.min_group_tickets, int,
+                                 "a whole number", "thresholds.",
+                                 InvalidDivideSettingError),
+        min_slice_files=_typed(th_raw, "min_slice_files",
+                               defaults.thresholds.min_slice_files, int,
+                               "a whole number", "thresholds.",
+                               InvalidDivideSettingError),
+        min_slice_roots=_typed(th_raw, "min_slice_roots",
+                               defaults.thresholds.min_slice_roots, int,
+                               "a whole number", "thresholds.",
+                               InvalidDivideSettingError),
+        overlap_report_limit=_typed(th_raw, "overlap_report_limit",
+                                    defaults.thresholds.overlap_report_limit, int,
+                                    "a whole number", "thresholds.",
+                                    InvalidDivideSettingError),
+        unclaimed_examples=_typed(th_raw, "unclaimed_examples",
+                                  defaults.thresholds.unclaimed_examples, int,
+                                  "a whole number", "thresholds.",
+                                  InvalidDivideSettingError),
+    )
+
+    def _words(key: str, fallback: List[str]) -> List[str]:
+        value = raw.get(key)
+        if value is None:
+            return list(fallback)
+        if not isinstance(value, list):
+            raise InvalidDivideSettingError(key, value, "a list of words")
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+
+    return DivideConfig(
+        advisor=advisor,
+        draft_path=_inside_the_project(raw, "draft_path", defaults.draft_path),
+        lane_file=_inside_the_project(raw, "lane_file", defaults.lane_file),
+        path_headings=_words("path_headings", defaults.path_headings),
+        lane_headings=_words("lane_headings", defaults.lane_headings),
+        containers=_words("containers", defaults.containers),
+        generic_dirs=_words("generic_dirs", defaults.generic_dirs),
+        feature_containers=_words("feature_containers", defaults.feature_containers),
+        thresholds=thresholds,
+    )
+
+
+def _inside_the_project(raw: Dict[str, Any], key: str, default: str) -> str:
+    """A configured path that stays where it was promised to stay.
+
+    Both of these are joined onto the repository root and then written to. An absolute
+    path, or one that climbs out with `..`, would have this command writing files
+    outside the project it was pointed at — the same rule `LANEKEEPER_HOME` already
+    enforces, and for the same reason.
+    """
+    value = str(raw.get(key) or default)
+    candidate = PurePosixPath(value.replace("\\", "/"))
+    if candidate.is_absolute() or ".." in candidate.parts or ":" in value[:3]:
+        raise InvalidDivideSettingError(
+            key, raw.get(key),
+            "a path inside this project, not an absolute one and not one that climbs "
+            "out of it with '..'")
+    return value
 
 
 def _parse_quality_commands(raw: Any) -> List[QualityCommand]:

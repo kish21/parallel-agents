@@ -32,8 +32,11 @@ from . import paths
 from .frameworks import default_url_templates
 from .intake import run_intake
 from .intake.presenter import render
+from .divide import propose
+from .divide import draft as divide_draft
+from .divide.presenter import render as render_division, render_confirmation
 from .trackers import UnknownTrackerError, get_tracker
-from .layout import detect_layout, measure_coverage
+from .layout import detect_layout, measure_coverage, tracked_files
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
 from .ports import PortManager
@@ -73,9 +76,13 @@ def _has_issue_template(root: Path) -> bool:
     return any((root / ".github" / name).is_file() for name in ISSUE_TEMPLATE_FILES)
 
 
-def _run_step1(args: argparse.Namespace) -> int:
-    """Step 1 of `lanekeeper start`: is the work written down, and does it cover
-    the features? See docs/start-step1-intake.md and issue #37."""
+def _step1_result(args: argparse.Namespace, dividing_next: bool = True):
+    """Step 1, run and reported. Returns its result and the exit code it implies.
+
+    The result is returned rather than only printed because step 2 is handed it —
+    tickets included — instead of going back to the tracker for a second read.
+    See docs/start-step1-intake.md and issue #37.
+    """
     root = Path.cwd()
     try:
         config = _config_for_start(root)
@@ -83,12 +90,12 @@ def _run_step1(args: argparse.Namespace) -> int:
         # A value in the configuration cannot be used as written. This is the first
         # command a new user runs, so it says which setting and why, not a traceback.
         print(f"❌ {exc}", file=sys.stderr)
-        return 1
+        return None, 1
     try:
         tracker = get_tracker(config.intake, root)
     except UnknownTrackerError as exc:
         print(f"❌ {exc}", file=sys.stderr)
-        return 1
+        return None, 1
 
     result = run_intake(
         root,
@@ -98,8 +105,16 @@ def _run_step1(args: argparse.Namespace) -> int:
         accept_as_is=getattr(args, "take_as_is", False),
     )
     print()
-    print(render(result, has_issue_template=_has_issue_template(root)))
-    return 0 if result.passed else 1
+    print(render(result, has_issue_template=_has_issue_template(root),
+                 dividing_next=dividing_next))
+    return result, (0 if result.passed else 1)
+
+
+def _run_step1(args: argparse.Namespace) -> int:
+    # `intake` is step 1 run on its own and stops there, so its report must not promise
+    # a step that is not about to happen.
+    _, code = _step1_result(args, dividing_next=False)
+    return code
 
 
 def cmd_intake(args: argparse.Namespace) -> int:
@@ -107,18 +122,100 @@ def cmd_intake(args: argparse.Namespace) -> int:
     return _run_step1(args)
 
 
-def cmd_start(args: argparse.Namespace) -> int:
-    """The guided entry point. Runs the pre-flight, then stops.
+def _run_step2(args: argparse.Namespace, intake_result) -> int:
+    """Step 2: divide the work. See docs/start-step2-divide.md and issue #38.
 
-    The later steps — grouping the work, creating the board, preparing each agent — are
-    issues #38 to #41 and are not built. `start` says so rather than implying it did
-    something it did not.
+    Handed the result of step 1, tickets included. It does not read the tracker again:
+    two reads of a live backlog inside one command can disagree, and a division based on
+    a different list from the one the user was just shown is worse than no division.
     """
-    code = _run_step1(args)
+    root = Path.cwd()
+    config = _config_for_start(root)
+    proposal = propose(root, config.divide, intake_result)
+    # Deliberately not `--fresh`, which means "ignore what step 1 decided". Re-using it
+    # here would make a flag about a recorded judgement quietly delete the file the user
+    # had spent time editing.
+    path, written = divide_draft.save(proposal, root, config.divide,
+                                      overwrite=getattr(args, "redraft", False))
+    print()
+    print(render_division(proposal, _relative(path, root), draft_written=written))
+    return 0
+
+
+def cmd_divide(args: argparse.Namespace) -> int:
+    """Propose how the work divides, or write down the division the user confirmed."""
+    root = Path.cwd()
+    try:
+        config = _config_for_start(root)
+    except ValueError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "confirm", False):
+        return _confirm_division(root, config, args)
+
+    result, code = _step1_result(args)
+    if result is None or not result.passed:
+        return code
+    return _run_step2(args, result)
+
+
+def _confirm_division(root: Path, config, args: argparse.Namespace) -> int:
+    """Write the division down — but only after re-checking what the user wrote.
+
+    The checks run against the edited file, never against the proposal that produced it.
+    Checking one thing and writing another is how a gate becomes decoration.
+    """
+    lanes, document, problem = divide_draft.load(root, config.divide)
+    if problem is not None:
+        print()
+        print(f"🛑 {problem.detail}")
+        return 1
+
+    report = divide_draft.validate(lanes, tracked_files(root), config.divide,
+                                   document=document)
+    if not report.ok:
+        print()
+        print(render_confirmation(report))
+        return 1
+
+    path, saved = divide_draft.write_lane_file(
+        document, root, config.divide, overwrite=getattr(args, "force", False))
+    if not saved:
+        # It may have been written by hand — shared zones, carve-outs, an `unowned`
+        # policy — and this command did not write it. Replacing it silently would throw
+        # away a decision somebody made deliberately.
+        print()
+        print(f"🛑 {_relative(path, root)} already exists, so I have not touched it.")
+        print("   Have a look at it, and if you want mine instead, run the same")
+        print("   command with --force.")
+        return 1
+    print()
+    print(render_confirmation(report, written=_relative(path, root)))
+    return 0
+
+
+def _relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    """The guided entry point. Runs the pre-flight, then divides the work, then stops.
+
+    The later steps — the board, the seats, preparing each agent — are issues #40, #33
+    and #41 and are not built. `start` says so rather than implying it did something it
+    did not.
+    """
+    result, code = _step1_result(args)
+    if result is None or not result.passed:
+        return code
+    code = _run_step2(args, result)
     if code == 0:
-        print("   The remaining steps of 'start' are not built yet. Until they are,")
-        print("   'lanekeeper init' is the low-level way to set this project up if you")
-        print("   already know how you want the work divided.")
+        print("   After that, 'start' would set each agent up with its own copy of the")
+        print("   project to work in — that part is not built yet (issues #33, #40, #41).")
     return code
 
 
@@ -809,6 +906,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_start = subparsers.add_parser(
         "start", help="Guided setup: start here if you are not sure what to run")
     _add_step1_flags(p_start)
+    p_start.add_argument(
+        "--redraft", action="store_true",
+        help="Throw away your edits to the proposed split and suggest it again")
     p_start.set_defaults(func=cmd_start)
 
     p_intake = subparsers.add_parser(
@@ -816,6 +916,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Check that this project's work is written down and covers its features")
     _add_step1_flags(p_intake)
     p_intake.set_defaults(func=cmd_intake)
+
+    p_divide = subparsers.add_parser(
+        "divide",
+        help="Propose how this project's work splits up, then write down your answer")
+    _add_step1_flags(p_divide)
+    p_divide.add_argument(
+        "--confirm", action="store_true",
+        help="Write down the split you confirmed, after re-checking it")
+    p_divide.add_argument(
+        "--redraft", action="store_true",
+        help="Throw away your edits to the proposed split and suggest it again")
+    p_divide.add_argument(
+        "--force", action="store_true",
+        help="Replace the file that records the split, if one is already there")
+    p_divide.set_defaults(func=cmd_divide)
 
     p_init = subparsers.add_parser("init", help="Initialize lanekeeper in current Git repository")
     p_init.add_argument("--name", help="Project name")

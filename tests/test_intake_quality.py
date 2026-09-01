@@ -56,9 +56,23 @@ class TestQuality(unittest.TestCase):
 
     def test_a_ticket_spanning_many_areas_is_flagged(self):
         body = ("backend/app/api.py frontend/src/App.tsx infra/main.tf "
-                "docs/guide.md scripts/deploy.sh")
+                "docs/guide.md scripts/deploy.sh mobile/App.kt")
         flags = inspect([issue(1, "Ship everything", body=body)], self.thresholds)
         self.assertIn(FlagKind.BROAD_TICKET, kinds(flags))
+
+    def test_a_feature_slice_across_the_stack_is_not_flagged(self):
+        """The default used to sit exactly on a correctly written ticket.
+
+        A feature slice owns its service, its page and its tests, so it touches three
+        top-level directories by design, and often docs and a migrations root as well.
+        At the old default of 3 the flag fired on the model the ticket form teaches;
+        it now fires on a ticket that really is several. See #38.
+        """
+        body = ("backend/app/domains/checkout/service.py "
+                "frontend/src/components/checkout/Cart.tsx "
+                "tests/test_checkout.py docs/checkout.md db/migrations/003_cart.sql")
+        flags = inspect([issue(1, "Collect an address", body=body)], self.thresholds)
+        self.assertNotIn(FlagKind.BROAD_TICKET, kinds(flags))
 
     def test_the_breadth_threshold_is_configuration(self):
         body = "backend/app/api.py frontend/src/App.tsx"
