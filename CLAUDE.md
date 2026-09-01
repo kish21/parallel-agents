@@ -3,7 +3,7 @@
 Project instructions and build state. Read this first; it exists so each session stops
 re-deriving the same decisions from the issue tracker.
 
-Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.0.
+Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.1.
 
 ---
 
@@ -226,6 +226,42 @@ environment has no `gh` and no `project` scope. First thing to do on a real mach
 - Step 3 (#39, dependency vs collision) is still not built.
 
 **Blockers:** none.
+
+---
+
+## Session of 2026-09-01 (fourth): the first real project — v0.7.1
+
+Ran the published v0.7.0 end to end on `kish21/mini-issue-tracker` (a React app with a
+product-playbook `PRODUCT.md` and three product-playbook tickets), with `gh` replaced by
+a stand-in serving the real issues. **v0.7.0 could not get past step 1** on it. Every
+fix below is pinned by a test and listed in CHANGELOG `[v0.7.1]`:
+
+- Coverage `GAPS` is advisory now (`gate._verdict_for`); nested bullets are not
+  features (`spec.extract_features`); the `NO_LABELS` flag is gone.
+- `divide.boundary` reads product-playbook's *📁 Target Modules & Exact File Names*
+  (emoji-prefixed heading, checkbox + bold label + backticked path), skips `---`.
+  `path_headings` default gained `target modules`, `target files`.
+- Solo lanes are named by the ticket tag (`names.tag`, `[FEAT-02]` → `feat-02`).
+- The draft offers a `shared:` block for files two entries claim (`draft._shared_candidates`).
+- `divide --confirm` on a fresh project runs `cli._first_time_setup` (cards, gitignore).
+- `.gitignore` no longer ignores `.lanekeeper/capabilities/` (`paths.gitignore_lines`).
+- `check`: repo root from git; `policy` lane also allows `.gitignore`, `lanes.yaml`,
+  the gate workflow (`check.policy_lane_paths`); missing-policy message says why.
+- `cleanup` deletes a fully merged agent branch (`WorktreeManager.delete_branch`).
+- README: five-minute opening from the trial's real output; reference below.
+  `docs/legacy/` holds the six process docs and `EXAMPLES.md`; `init` says its lanes
+  are layers.
+
+**What the trial proved in real CI:** on `mini-issue-tracker` PR #8 (agent branch,
+label `lane: feat-02`) the gate failed closed before the label and **passed after it**.
+PR #7 (the policy, label `lane: policy`) fails until v0.7.1 is on PyPI, because the
+workflow installs the published package. Neither PR is merged; that is the owner's call.
+`verify` on PR #7 is the tracker's own gitleaks step failing on a shallow checkout —
+not lanekeeper's.
+
+**Still unverified:** `lanekeeper board` against a live GitHub project (no `gh` here).
+**Known:** grouped lanes are still named from a shared path segment (`prompt` for
+#1+#3); good enough, not great. `intake.coverage` remains a word match.
 
 **Known local noise:** `test_ports` (×2) and `test_cleanup` fail on the user's Windows
 machine on port-allocation assertions. Confirmed pre-existing on clean `main`; CI's

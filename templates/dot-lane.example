@@ -1,9 +1,10 @@
-# .lane — Per-checkout seat declaration file
-# Copy this file to `.lane` in each worktree/checkout.
-
-SEAT="JR1"
-ROLE="junior"
-ALLOWED_LANES="interface,service"
-FORBIDDEN_LANES="data,platform"
-PORT_FRONTEND="3003"
-PORT_BACKEND="8003"
+# .lane — written into every agent worktree by `lanekeeper spawn`. Do not hand-edit;
+# it is regenerated. An agent told "read .lane" learns its seat, its lane, its task and
+# the exact paths it may and may not touch. Values are POSIX single-quoted.
+SEAT='JR1'
+ROLE='jr1'
+LANE='checkout'
+AGENT_ID='agent-001'
+TASK='#12 checkout: cart to confirmed order'
+ALLOW='src/checkout/** tests/checkout/**'
+DENY='src/checkout/legacy/**'

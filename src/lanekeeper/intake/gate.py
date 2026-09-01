@@ -138,17 +138,19 @@ def _judge(issues: Sequence, spec: ProductSpec, thresholds, tracker_name: str,
 
 
 def _verdict_for(report: CoverageReport, flags, issue_count: int, thresholds):
-    """Coverage decides first; ticket quality can only hold things up, never pass them.
+    """Coverage is reported; ticket quality can hold things up.
 
-    A gap in coverage is the playbook's to fill, because the missing thing is work that
-    was never written down. Unusable tickets are the user's to sort out, and only stop
-    the run when they affect enough of the backlog that grouping would be guesswork.
+    A coverage gap used to stop the run outright. Coverage is a word-overlap between a
+    feature's name and the tickets' text, and on the first real project it was run
+    against it read three sub-bullets of one feature as three missing features and
+    refused to continue, with no flag that could answer it. A gap is now said out loud,
+    with the features named, and the run carries on: the user knows whether "Problem
+    summary & context" is a feature, and the tool does not.
 
-    Returns the verdict and, when the reason for stopping is not already visible in the
-    coverage report, a plain-language sentence saying what it was.
+    Unusable tickets still stop the run when they affect enough of the backlog that
+    grouping would be guesswork. Returns the verdict and, when the reason for stopping
+    is not already visible in the coverage report, a sentence saying what it was.
     """
-    if report.verdict is CoverageVerdict.GAPS:
-        return Verdict.NEEDS_PLAYBOOK, ()
     if report.verdict is CoverageVerdict.CANNOT_JUDGE:
         return Verdict.NEEDS_TIDYING, ()
 

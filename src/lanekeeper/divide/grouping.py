@@ -115,6 +115,10 @@ def _chosen_name(boundary: TicketBoundary, candidates: Sequence[str],
 def _lane(name: str, tickets: Sequence[TicketBoundary], settings) -> ProposedLane:
     paths = _merge_paths(tickets)
     grouped = len(tickets) > 1
+    if not grouped:
+        # A name that was shared by several tickets but ended up holding one is a
+        # name about a directory, not about this work. The ticket's own tag is clearer.
+        name = naming.tag(tickets[0].title) or name
     return ProposedLane(
         name=name,
         paths=paths,
@@ -134,8 +138,14 @@ def _solo_lane(boundary: TicketBoundary, settings) -> ProposedLane:
     Named after whatever its paths are about, and after the ticket itself when they are
     about nothing nameable — a lane called after its single ticket is perfectly clear.
     """
+    # The ticket's own tag first: a lane called `feat-02` says exactly which piece of
+    # work it is, where a name read out of its paths (`prompts`, from one directory the
+    # ticket happens to touch) said something misleading on the first real project.
     candidates = _candidate_names(boundary, settings)
-    name = candidates[0] if candidates else naming.slug(boundary.title) or f"work-{boundary.ref}"
+    name = (naming.tag(boundary.title)
+            or (candidates[0] if candidates else "")
+            or naming.slug(boundary.title)
+            or f"work-{boundary.ref}")
     return ProposedLane(
         name=name,
         paths=tuple(boundary.paths),

@@ -36,6 +36,17 @@ _WORDS = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z0-9]+|[A-Z]+|[0-9]+")
 #: A path segment that is a wildcard names nothing.
 _WILDCARD = re.compile(r"[*?\[\]]")
 
+#: A tag at the front of a title: `[FEAT-02]: Clustering engine`, `[BUG-7] ...`.
+#: product-playbook writes every ticket this way, and the tag is the one name that is
+#: stable, unique, and traceable back to the ticket.
+_TAG = re.compile(r"^\s*\[([A-Za-z][A-Za-z0-9]*-?[0-9]+)\]")
+
+
+def tag(title: str) -> str:
+    """The ticket's own tag as a lane name, or nothing when the title has none."""
+    match = _TAG.match(title or "")
+    return match.group(1).lower() if match else ""
+
 
 def candidates(path: str, settings) -> List[str]:
     """Every feature name a single path could be about, most specific first.

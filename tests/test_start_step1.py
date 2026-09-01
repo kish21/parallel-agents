@@ -138,14 +138,25 @@ class TestAFreshLocalProject(StartTestCase):
 
 
 class TestCoverage(StartTestCase):
-    def test_reports_features_with_nothing_written_against_them(self):
+    def test_reports_features_with_nothing_written_against_them_and_carries_on(self):
         (self.root / "PRODUCT.md").write_text("## Scope\n- Checkout\n- Billing\n",
                                               encoding="utf-8")
         code, out = self.run_start(GOOD_ISSUES)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0, out)
         self.assertIn("Billing", out)
         self.assertIn("PRODUCT.md", out)
+        self.assertIn("word match, not a judgement", out)
         self.assertNotIn("Checkout\n", out.split("nothing written")[-1][:40])
+
+    def test_a_sub_bullet_of_a_feature_is_not_a_missing_feature(self):
+        """The first real project: three details under one feature read as three gaps."""
+        (self.root / "PRODUCT.md").write_text(
+            "## Scope\n1. **Checkout:** cart to order\n   - Problem summary & context\n"
+            "   - Specific acceptance criteria\n2. **Search:** find things\n",
+            encoding="utf-8")
+        code, out = self.run_start(GOOD_ISSUES)
+        self.assertNotIn("Problem summary", out)
+        self.assertNotIn("acceptance criteria", out)
 
     def test_cannot_judge_is_said_plainly_and_never_guessed(self):
         code, out = self.run_start(GOOD_ISSUES)

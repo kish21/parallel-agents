@@ -8,6 +8,7 @@ the same recycled id, resolved to the same path and failed. Recovery needed a ma
 delete, because no command could see the problem any more.
 """
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,7 +18,7 @@ from pathlib import Path
 from lanekeeper.state import StateManager
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _cli_harness import run_cli  # noqa: E402
+from _cli_harness import output_of, run_cli  # noqa: E402
 
 
 class TestCleanupHonesty(unittest.TestCase):
@@ -190,3 +191,44 @@ class TestUnfinishedCleanupIsHeldNotReleased(unittest.TestCase):
         self.assertFalse(Path(agent.worktree_path).exists())
         self.assertIsNone(StateManager(self.root).get_agent("agent-001"))
         self.assertEqual(StateManager(self.root).get_allocated_ports(), {})
+
+
+class TestCleanupAndTheBranch(unittest.TestCase):
+    """The branch goes with the worktree when its work is merged, and stays when not."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", "."], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t.c"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=self.root, check=True)
+        (self.root / "backend").mkdir()
+        (self.root / "backend" / "a.py").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "init"], cwd=self.root, check=True)
+        run_cli(["init"], cwd=self.root)
+
+    def _branches(self):
+        out = subprocess.run(["git", "branch", "--format=%(refname:short)"], cwd=self.root,
+                             capture_output=True, text=True).stdout.split()
+        return [b for b in out if b.startswith("parallel/")]
+
+    def test_a_merged_branch_is_deleted_with_the_worktree(self):
+        run_cli(["spawn", "--lane", "backend", "--task", "t"], cwd=self.root)
+        self.assertEqual(len(self._branches()), 1)
+        res = run_cli(["cleanup", "agent-001", "--force"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("Deleted branch", res.stdout)
+        self.assertEqual(self._branches(), [])
+
+    def test_an_unmerged_branch_is_kept_and_named(self):
+        run_cli(["spawn", "--lane", "backend", "--task", "t"], cwd=self.root)
+        wt = self.root / ".lanekeeper" / "worktrees" / "agent-001"
+        (wt / "backend" / "b.py").write_text("new", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t.c", "-c", "user.name=t", "commit", "-qm", "work"],
+                       cwd=wt, check=True)
+        res = run_cli(["cleanup", "agent-001", "--force"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("Kept branch", res.stdout)
+        self.assertEqual(len(self._branches()), 1)

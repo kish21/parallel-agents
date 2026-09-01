@@ -161,6 +161,23 @@ class TestAPolicyChangeIsItsOwnLane(CheckoutTestCase):
         self.assertEqual(res.returncode, 2, output_of(res))
         self.assertIn("defines the lanes", res.stdout)
 
+    def test_the_pull_request_that_installs_lanekeeper_passes_as_policy(self):
+        """Policy, cards, ignore rules, the human record and the gate's own workflow."""
+        cards = self.tmp / ".lanekeeper" / "capabilities"
+        cards.mkdir(parents=True, exist_ok=True)
+        self._commit(".lanekeeper/capabilities/JR1.json", '{"seat": "JR1"}')
+        self._commit(".gitignore", "/.lanekeeper/*\n!/.lanekeeper/config.yaml\n")
+        self._commit("lanes.yaml", "version: 1\n")
+        self._commit(".github/workflows/lanekeeper-gate.yml", "name: Lane gate\n")
+        res = self._check("--lane", "policy")
+        self.assertEqual(res.returncode, 0, output_of(res))
+
+    def test_check_runs_from_a_subdirectory(self):
+        self._commit("src/checkout/cart.py")
+        res = run_cli(["check", "--lane", "checkout", "--base", "main"],
+                      cwd=self.tmp / "src" / "checkout")
+        self.assertEqual(res.returncode, 0, output_of(res))
+
     def test_policy_cannot_be_declared_as_a_lane(self):
         cfg_dir = self.tmp / ".lanekeeper"
         (cfg_dir / "config.yaml").write_text(

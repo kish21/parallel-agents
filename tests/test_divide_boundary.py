@@ -113,3 +113,42 @@ class BoundaryTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestProductPlaybookTickets(unittest.TestCase):
+    """The companion tool's own ticket shape, as found on the first real project."""
+
+    BODY = (
+        "# [FEAT-01]: Issue CRUD (M1)\n\n### 🎯 Feature Overview & User Goal\nProvide a fast UI.\n\n"
+        "---\n\n### 📁 Target Modules & Exact File Names\n"
+        "- [x] **Domain / Contracts:** `src/domain/contracts.ts` *(IssueContract, validateIssue)*\n"
+        "- [ ] **Services / Logic:** `src/services/issueService.ts` *(CRUD & validation)*\n"
+        "- [ ] **UI Components:** \n"
+        "  - `src/components/features/IssueCard.tsx` *(Interactive card)*\n"
+        "  - `src/components/features/NewIssueModal.tsx`\n"
+        "- [x] **Automated Tests:** `tests/unit/promptSynthesis.test.ts` & `tests/unit/contracts.test.ts`\n\n"
+        "---\n\n### 🛠️ Step-by-Step Implementation Tasks\n- [ ] 1. Implement `IssueService` in `src/services/issueService.ts`.\n"
+    )
+
+    def test_the_heading_with_an_emoji_and_backticked_paths_is_read(self):
+        from lanekeeper.config import DivideConfig
+        b = boundary.read(_issue(1, "t", self.BODY), DivideConfig())
+        self.assertEqual(b.paths, (
+            "src/domain/contracts.ts",
+            "src/services/issueService.ts",
+            "src/components/features/IssueCard.tsx",
+            "src/components/features/NewIssueModal.tsx",
+            "tests/unit/promptSynthesis.test.ts",
+            "tests/unit/contracts.test.ts",
+        ))
+        self.assertEqual(b.ignored_lines, ("- [ ] **UI Components:**",))
+
+    def test_paths_in_the_tasks_section_are_not_a_boundary(self):
+        from lanekeeper.config import DivideConfig
+        b = boundary.read(_issue(1, "t", self.BODY), DivideConfig())
+        self.assertNotIn("IssueService", " ".join(b.paths))
+
+
+def _issue(ref, title, body):
+    from lanekeeper.trackers.base import TrackedIssue
+    return TrackedIssue(ref=str(ref), title=title, body=body)

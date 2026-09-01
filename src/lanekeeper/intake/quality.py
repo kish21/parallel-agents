@@ -47,13 +47,9 @@ def inspect(issues: Sequence, thresholds) -> Tuple[QualityFlag, ...]:
                     "cannot tell which group of work they belong to."),
         ))
 
-    unlabelled = tuple(i.ref for i in issues if not i.labels)
-    if unlabelled:
-        flags.append(QualityFlag(
-            kind=FlagKind.NO_LABELS,
-            issue_refs=unlabelled,
-            detail="These have no labels, which is the other clue I use to group them.",
-        ))
+    # Labels are deliberately not flagged. Nothing downstream groups by label — the
+    # division reads file paths and the board's Lane field — so "these have no labels"
+    # was a complaint about a clue nobody used, and on every real backlog it fired.
 
     for left, right, score in _duplicate_pairs(
             issues, thresholds.duplicate_title_score, thresholds.duplicate_report_limit):

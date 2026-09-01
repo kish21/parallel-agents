@@ -178,3 +178,16 @@ class TestConfiguredPathsStayInTheProject(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNestedBullets(unittest.TestCase):
+    def test_a_nested_bullet_is_a_detail_not_a_feature(self):
+        text = ("## Scope\n1. **Prompt Generator:** one click\n   - Problem summary & context\n"
+                "   - Acceptance criteria\n2. Fast UI\n\n## Plan\n- Recommendations\n")
+        names = [f.name for f in extract_features(text, ["scope", "plan"])]
+        self.assertEqual(names, ["Prompt Generator", "Fast UI", "Recommendations"])
+
+    def test_indentation_resets_per_section(self):
+        text = "## Scope\n  - Indented first\n  - Indented second\n## Plan\n- Flat\n"
+        names = [f.name for f in extract_features(text, ["scope", "plan"])]
+        self.assertEqual(names, ["Indented first", "Indented second", "Flat"])

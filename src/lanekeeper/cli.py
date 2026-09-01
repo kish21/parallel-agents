@@ -215,11 +215,19 @@ def _confirm_division(root: Path, config, args: argparse.Namespace) -> int:
         print("   Have a look at it, and if you want mine instead, run the same")
         print("   command with --force.")
         return 1
-    policy, skipped = divide_draft.apply_to_config(document, root,
-                                                   project_name=config.project_name)
+    policy, skipped, created = divide_draft.apply_to_config(
+        document, root, project_name=config.project_name)
+    if created:
+        # The first real project: the policy `confirm` wrote carried the default
+        # capability gates, and a gate with no card for any seat refuses every spawn.
+        # A policy created here gets the same first-time setup `init` does.
+        _first_time_setup(root, load_config(root))
     print()
     print(render_confirmation(report, written=_relative(path, root),
                               policy=_relative(policy, root)))
+    if created:
+        print(f"   Starter capability cards and .gitignore rules were written too, as")
+        print(f"   'lanekeeper init' would have. Commit {paths.display_config_path()}.")
     if skipped:
         print(f"   '{', '.join(skipped)}' claims whatever nobody else does, which the "
               f"gate cannot enforce yet, so it is not in the policy file.")
@@ -326,6 +334,14 @@ def cmd_board(args: argparse.Namespace) -> int:
     return code
 
 
+def _first_time_setup(root: Path, cfg: Config) -> List[Path]:
+    """What every new policy needs besides its lanes: state, ignore rules, seat cards."""
+    StateManager(root)
+    (root / cfg.worktree_dir).mkdir(parents=True, exist_ok=True)
+    ensure_gitignore(root)
+    return [save_card(card, root) for card in default_cards(sorted(cfg.lanes))]
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     root = Path.cwd()
     worktree_mgr = WorktreeManager(root)
@@ -378,6 +394,12 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"🧭 Detected {len(cfg.lanes)} lanes from the repository layout: {lane_names}")
     else:
         print(f"🧭 Using generic starter lanes: {lane_names}")
+    # These lanes are named after what kind of code a directory holds. That is the
+    # opposite of the split this tool argues for — a lane is a feature, top to bottom —
+    # and it stays here only as the direct route for someone who already knows their
+    # lanes. Said out loud so nobody mistakes the escape hatch for the front door.
+    print("   These are technology layers, a starting point only. 'lanekeeper start'")
+    print("   divides by feature from your tickets and writes the same file.")
     print(f"   Coverage: {coverage:.0%} of {total} tracked files fall inside a lane.")
 
     if total and coverage < 0.5:
@@ -495,7 +517,7 @@ def gitignore_block(root: Optional[Path] = None) -> str:
 # Without these rules an agent running `git add -A` would sweep every other agent's
 # worktree into its own commit.
 {ignore}
-# The lane policy is the team's shared contract - keep it tracked.
+# The lane policy and the seat cards are the team's shared contract - keep them tracked.
 {keep}
 {GITIGNORE_END}
 """
@@ -712,7 +734,12 @@ def cmd_open(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     """The boundary check as a pull-request gate. See `lanekeeper.check`."""
-    root = Path.cwd()
+    # The checkout's root, not the current directory: a reviewer runs this from
+    # wherever they are, and CI runs it from the repository root anyway.
+    try:
+        root = WorktreeManager._find_repo_root()
+    except GitError:
+        root = Path.cwd()
 
     if args.write_workflow:
         written = check_mod.write_workflow(root, args.label_prefix, force=args.force)
@@ -726,7 +753,16 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     try:
         config = load_config(root)
-    except (FileNotFoundError, ValueError) as e:
+    except FileNotFoundError:
+        # The first real project: the agent branched from main before the policy was
+        # merged there, so its checkout had no policy and the gate could not run.
+        print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
+              f"policy to check against.", file=sys.stderr)
+        print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
+              f"branch is made from it. Merge it there, bring it into this branch, and "
+              f"run the check again.", file=sys.stderr)
+        return 1
+    except ValueError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1
 
@@ -1022,6 +1058,18 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print("   stop it and run cleanup again.", file=sys.stderr)
         return 1
 
+    # 2b. The branch. Deleted only when git agrees everything on it is merged; an
+    #     unmerged branch is kept and named, because a branch is the one thing here that
+    #     may hold work nobody has merged yet. Monotonic agent ids meant these used to
+    #     pile up forever, and a re-spawned agent silently resumed an old one.
+    branch_note = ""
+    if agent.branch:
+        if worktree_mgr.delete_branch(agent.branch):
+            branch_note = f"   Deleted branch {agent.branch} (fully merged)."
+        elif worktree_mgr.branch_exists(agent.branch):
+            branch_note = (f"   Kept branch {agent.branch}: it has commits nobody has merged. "
+                           f"Delete it yourself with 'git branch -D' when you are sure.")
+
     # 3. Release ports, and say so when one is still being served. A reservation can be
     # withdrawn from the ledger, but a process nobody recorded a PID for cannot be, and
     # silently handing that port back to the pool is how an agent ends up talking to a
@@ -1035,6 +1083,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     print(f"🧹 Successfully cleaned up agent '{agent.name}' ({agent.id}).")
     if released:
         print(f"   Released ports: {', '.join(str(p) for p in released)}")
+    if branch_note:
+        print(branch_note)
     if still_bound:
         ports = ", ".join(str(p) for p in sorted(still_bound))
         print(f"⚠️  Port(s) {ports} are still bound by a live process.")

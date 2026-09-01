@@ -277,3 +277,12 @@ class WorktreeManager:
 
     def prune(self) -> None:
         self._run_git(["worktree", "prune"], check=False)
+
+    def delete_branch(self, branch_name: str, force: bool = False) -> bool:
+        """Deletes a local branch. Returns False when git refuses — an unmerged branch
+        without `force` — so the caller can say the work was kept, not lost."""
+        if not self.branch_exists(branch_name):
+            return False
+        flag = "-D" if force else "-d"
+        res = self._run_git(["branch", flag, branch_name], check=False)
+        return res.returncode == 0
