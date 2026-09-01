@@ -59,6 +59,10 @@ lifecycle. Verified against a real full-stack application.
 README with a fully worked 17-lane example in `examples/feature-lanes.yaml`. Nothing
 reads that file yet; it is the contract steps 2–4 will write to.
 
+**Merged (#46):** the ticket form stopped asking for a technology layer. `Lane` is free
+text and optional; **`Allowed File Paths` is the required field**, in `bug.yml` too.
+Design doc: [`docs/ticket-template.md`](docs/ticket-template.md).
+
 **Merged (#37, step 1 of the #36 umbrella — PR #45):** `lanekeeper start` and
 `lanekeeper intake` — the pre-flight gate. Design doc:
 [`docs/start-step1-intake.md`](docs/start-step1-intake.md).
@@ -79,8 +83,8 @@ reads that file yet; it is the contract steps 2–4 will write to.
 | Step | What it does | Issue | State |
 |---|---|---|---|
 | 1 | Is the work written down, and does it cover the features? | #37 | **done — PR #45, merged** |
-| 2 | Divide the work: group where it groups, otherwise ask which tickets to hand out | #38 | **next — rewritten, see below** |
-| 3 | Separate a dependency from a collision; fuse or share | #39 | not started |
+| 2 | Divide the work: group where it groups, otherwise ask which tickets to hand out | #38 | **done — PR #47, open** |
+| 3 | Separate a dependency from a collision; fuse or share | #39 | **next** |
 | 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | not started |
 | 5 | Ask how many agents exist and how many to activate now | #33 | not started |
 | 6 | Prepare a desk per activated agent | #41 | not started |
@@ -118,84 +122,83 @@ product, we do not. Three consequences:
 
 ---
 
-## Session of 2026-09-01 (this one): the ticket form — PR #46
+## Session of 2026-09-01 (this one): #38, step 2 — PR #47
 
-**Done.** PR #45 merged (#37 closed). #38 and #36 rewritten as comments. Then one
-subtask: the ticket form stopped asking for a technology layer.
+**Done.** `lanekeeper divide` — the whole of step 2. Design doc:
+[`docs/start-step2-divide.md`](docs/start-step2-divide.md), confirmed before any code
+was written.
 
-`Lane` was a dropdown of `interface / service / data / platform` — the model #23 and the
-README reject, in the one place the user *has* to fill in. Now free text and **optional**;
-`Allowed File Paths` is the **required** field in its place, in `bug.yml` too, which never
-asked for it. Six files, not two: `templates/issue-template-*.yml` ship to users and had
-drifted, `CONTRIBUTING.md` taught the enum before the form, `05-github-mechanics.md` told
-readers to *build* the dropdown. Design doc:
-[`docs/ticket-template.md`](docs/ticket-template.md); guard:
-`tests/test_issue_template.py`. No `src/` change.
+- `src/lanekeeper/divide/` — `boundary` (reads **only** the Allowed File Paths section),
+  `names` (a feature name out of a path — the replacement for `ROLE_BY_DIR_NAME`),
+  `codebase` (feature slices read from the tree), `grouping`, `collision` (a set
+  intersection over globs), `draft` (propose → the user edits → `--confirm`),
+  `proposal`, `presenter`, `models`.
+- `config.yaml` gains a `divide:` section, fully defaulted. `advisor: none` is the only
+  accepted value and any other **fails the load** rather than being ignored.
+- `IntakeResult` now carries the tickets step 1 read — runtime only, never recorded,
+  re-attached on a resumed run. Step 2 does not read the tracker.
+- `intake.thresholds.broad_ticket_areas` default **3 → 5** (a feature slice spans
+  backend + frontend + tests by design).
 
-**PR #46 does not say `Closes #23`** — deliberately. `layout.py`'s `ROLE_BY_DIR_NAME` is
-the other, larger half of #23 and is #38's to displace. The tickets stop teaching layers;
-the detection has not.
+**The interaction, settled with the user:** draft file plus `--confirm`, not an
+interactive picker. `--redraft` replaces a draft the user has edited; `--force` replaces
+an existing `lanes.yaml`. Neither is ever done silently.
+
+**What the worked-example run actually recovered** (the MarkVid stand-in, since MarkVid
+is not on this machine): 9 of the example's 17 lane names exactly, 4 more as the head
+word of a compound name — 13 of 17. The 4 missed are the ones the example itself calls
+residue, and a test asserts they are **not** invented.
+
+**#23 is not closed.** The guided path no longer goes near `layout.ROLE_BY_DIR_NAME`;
+`init` still uses it. That half is a separate session with real blast radius on v0.6.0.
 
 ---
 
-## NEXT SESSION PLAN — #38, step 2: divide the work
-
-**Do this and only this.** It is the step the whole tool rests on.
+## NEXT SESSION PLAN — #39, step 3: dependency or collision?
 
 **How to resume**
 
-1. `git checkout main && git pull` — PR #46 should be merged first.
-2. Read the **#38 rewrite comment**, then `docs/ticket-template.md` (the input contract),
-   then `docs/start-step1-intake.md` for the shape step 2 inherits.
-3. Step 2 is handed an `IntakeResult` (`lanekeeper.intake.models`). **Do not re-read the
-   tracker from step 2.**
-4. Write `docs/start-step2-divide.md` (exit criteria, interaction map, test plan)
-   **before** coding, and confirm it with the user.
+1. `git checkout main && git pull` — PR #47 should be merged first.
+2. Read `docs/start-step2-divide.md` §5 (what step 2 already answers) and the #39 issue.
+3. Step 3 is handed a `DivisionProposal` (`lanekeeper.divide.models`) whose `overlaps`
+   are already computed. **Do not re-run the mechanical check** — extend it.
+4. Write `docs/start-step3-collisions.md` before coding, and confirm it.
 
-**What #38 must get right**
+**What #38 already did that #39 was going to**
 
-- Feature slices, never backend/frontend. `layout.py`'s `ROLE_BY_DIR_NAME` must stop
-  being the default (#23) — this is where that happens.
-- Two sources: the tickets on a new project, the **code** on a half-built one. Where both
-  exist use both and say which source each came from. If the user is unsure, go and read
-  the code — that is the fallback, not an error.
-- **Propose, then confirm.** Never a blank form; never a silent decision.
-- A backlog that does not group produces a **pick list**, not a stop.
-- Every ticket lands in exactly one entry or an explicit "could not place these" list.
-- Report any two picks touching the same files, before writing the lane file (#34).
-- Run against MarkVid, the proposal should be recognisably its 17 lanes.
+The mechanical half is done and shipped: `divide.collision` reports whether two entries
+touch the same files, with the file that proves it, and marks the weaker
+`patterns-only` case as weaker. `deny` and shared zones are honoured. #39 keeps the
+question that is actually hard: **is an overlap a dependency or a collision, and is the
+answer to fuse the two entries or to declare a shared zone with a steward?**
 
-**Two things this session found and left for #38** (both in `docs/ticket-template.md` §7)
+**Two things this session found and left for #39**
 
-- `intake.quality`'s `broad_ticket_areas` defaults to **3**, but a correct feature slice
-  spans `backend` + `frontend` + `tests` — exactly 3. The default sits on the boundary of
-  the model the form now teaches. Measured: current placeholders do not trip it, one more
-  line does. It is config; decide what it should be now a lane spans the stack by design.
-- **Asking for missing file paths is #38's job.** A draft of `bug.yml` promised the filer
-  would "be asked about" — nothing does that, and `quality._file_hints` scans the whole
-  body, so a stack trace in the Evidence field supplies a path and no flag is raised at
-  all. The promise was cut rather than faked.
+- `collision._answered_by` is approximate: a `deny` or shared pattern intersecting both
+  sides is taken to cover the region they share. It only ever suppresses the structural
+  finding, never one proved by a real file, and it is documented as approximate — but
+  #39 owns the exact answer if it needs one.
+- The `wider_paths` offer (a ticket named files one by one; the area they sit in is
+  offered as commented lines) is the seam where "fuse or share" would naturally be
+  proposed.
 
 **Constraints that carry over**
 
-- **Never tell the user to restructure their repository.** Lanes are globs and can carve
-  a feature slice out of a messy tree without moving a file. At most *mention* that a
-  tidier layout would sharpen things. Anything stronger locks out the legacy projects
-  that need this most. `tests/test_issue_template.py` guards this in the form's wording.
-- **The gate never calls a model.** Enforce with rules, propose with intelligence. A
-  verdict that changes between runs is not a guarantee. Any advisor sits behind
-  `advisor: none` by default.
-- `check` is #31's name. Do not reuse it.
-- No hardcoding: sources, paths and thresholds are config; externals behind a provider
-  interface (`src/lanekeeper/trackers/`).
-- Plain language in every user-facing string. `intake/presenter.py` and
-  `test_intake_language.py` are the pattern to copy.
+- **The gate never calls a model.** `divide.advisor` exists, defaults to `none`, and any
+  other value fails the config load. Keep it that way.
+- **Never tell the user to restructure their repository.** Guarded by
+  `test_divide_language.py::test_no_case_tells_the_user_to_rearrange_their_project`.
+- Plain language in every user-facing string; the vocabulary guard covers every rendered
+  case and treats a file name as a name, not a word.
+- `check` is #31's name. `divide` is step 2's.
+- No hardcoding: word lists, headings, thresholds and paths are all config, and the two
+  configured paths are checked to stay inside the project.
 
-**Blockers:** none. #38 depends on #37 (merged) and on PR #46 (open).
+**Blockers:** PR #47 must merge first.
 
-**Known local noise:** `test_ports`, `test_cleanup` and `test_state_lock` fail on this
-Windows machine with `os.replace` `PermissionError`. Confirmed pre-existing on clean
-`main`; CI's windows-latest is green. Not a regression — do not chase it.
+**Known local noise:** `test_ports` (×2) and `test_cleanup` fail on this Windows machine
+on port-allocation assertions. Confirmed pre-existing on clean `main`; CI's
+windows-latest is green. Not a regression — do not chase it.
 
 ---
 

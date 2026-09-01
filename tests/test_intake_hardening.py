@@ -201,5 +201,52 @@ class TestConfigurationErrorsAreExplained(unittest.TestCase):
         self.assertEqual(load_config(self.root).intake.tracker, "github")
 
 
+class TestTheTicketsHandedOnAreTodaysTickets(unittest.TestCase):
+    """Step 2 is handed step 1's result, tickets included, and never re-reads them.
+
+    Which makes one thing load-bearing: on a *resumed* run, the recorded judgement is
+    reused but the tickets must not be. A record holds what step 1 concluded, not a copy
+    of the work — and dividing a snapshot of yesterday's backlog while telling the user
+    it read today's is exactly the class of quiet wrongness step 1 exists to refuse.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "PRODUCT.md").write_text("""## Scope
+- Checkout
+""", encoding="utf-8")
+        self.settings = IntakeConfig(tracker="fake")
+        self.issues = [
+            issue(1, "Checkout coupon fix", body="backend/api/checkout.py"),
+            issue(2, "Checkout address form", body="frontend/src/checkout/Address.tsx"),
+            issue(3, "Checkout receipt", body="backend/api/receipt.py"),
+        ]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_fresh_run_carries_the_tickets_it_read(self):
+        result = run_intake(self.root, self.settings, FakeTracker(self.issues))
+        self.assertEqual([i.ref for i in result.issues], ["1", "2", "3"])
+
+    def test_a_resumed_run_carries_the_tickets_as_they_are_now(self):
+        first = run_intake(self.root, self.settings, FakeTracker(self.issues))
+        self.assertTrue(first.passed)
+        # Same fingerprint inputs — the ref, title and labels are unchanged — so the
+        # judgement resumes. The bodies handed on must still be the ones just read.
+        again = run_intake(self.root, self.settings, FakeTracker(self.issues))
+        self.assertTrue(again.resumed)
+        self.assertEqual([i.ref for i in again.issues], ["1", "2", "3"])
+
+    def test_the_record_on_disk_holds_no_copy_of_the_backlog(self):
+        run_intake(self.root, self.settings, FakeTracker(self.issues))
+        written = paths.intake_record_path(self.root).read_text(encoding="utf-8")
+        self.assertNotIn("Checkout coupon fix", written)
+        self.assertNotIn("backend/api/checkout.py", written)
+        restored = record.load(self.root)
+        self.assertEqual(restored.issues, ())
+
+
 if __name__ == "__main__":
     unittest.main()

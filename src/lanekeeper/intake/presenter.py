@@ -25,7 +25,8 @@ BANNED_WORDS = ("lane", "lanes", "worktree", "worktrees", "seat", "seats",
 PLAYBOOK_STEPS = ("/vision", "/scope", "/plan")
 
 
-def render(result: IntakeResult, has_issue_template: bool = False) -> str:
+def render(result: IntakeResult, has_issue_template: bool = False,
+           dividing_next: bool = True) -> str:
     """The whole of step 1's output for one run.
 
     `has_issue_template` is passed in rather than looked up: this module reads nothing
@@ -46,7 +47,7 @@ def render(result: IntakeResult, has_issue_template: bool = False) -> str:
     flag_lines = _flag_lines(result)
     if flag_lines:
         lines += [""] + flag_lines
-    lines += [""] + _next_lines(result, has_issue_template)
+    lines += [""] + _next_lines(result, has_issue_template, dividing_next)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -211,11 +212,20 @@ def _refs(refs, limit: int = 8) -> str:
     return shown if len(refs) <= limit else f"{shown} (and {len(refs) - limit} more)"
 
 
-def _next_lines(result: IntakeResult, has_issue_template: bool = False) -> List[str]:
+def _next_lines(result: IntakeResult, has_issue_template: bool = False,
+                dividing_next: bool = True) -> List[str]:
     if result.verdict is Verdict.READY:
+        # This same report is printed by the check run on its own, which stops here.
+        # Saying "next I will…" when nothing follows is a small lie about what the
+        # command just did.
+        if dividing_next:
+            return [
+                "   Next: I will work out how this splits into groups, so each agent",
+                "   gets one of them.",
+            ]
         return [
-            "   Next: I would work out how this splits into groups, so each agent gets",
-            "   one of them — but that part is not built yet (issue #38).",
+            "   Working out how this splits into groups is the next step, and",
+            "   'lanekeeper divide' is the command that does it.",
         ]
 
     if result.coverage.verdict is CoverageVerdict.GAPS:

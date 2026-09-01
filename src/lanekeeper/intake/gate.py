@@ -86,7 +86,11 @@ def run_intake(
     if use_record:
         previous = record.load(root)
         if previous is not None and previous.passed and previous.fingerprint == stamp:
-            return IntakeResult(**{**previous.__dict__, "resumed": True})
+            # The tickets come from this run, not from the record. A resumed result
+            # is a resumed *judgement*; the work itself is whatever the tracker says
+            # today, and step 2 divides that.
+            return IntakeResult(**{**previous.__dict__, "resumed": True,
+                                   "issues": tuple(issues)})
 
     result = _judge(issues, spec, settings.thresholds, tracker.name, stamp)
     if accept_as_is and result.verdict is Verdict.NEEDS_TIDYING:
@@ -95,7 +99,9 @@ def run_intake(
                                  "accepted_as_is": True})
     if result.passed:
         record.save(result, root)
-    return result
+    # Attached after recording, never before: the record is a judgement about the work,
+    # not a copy of it.
+    return IntakeResult(**{**result.__dict__, "issues": tuple(issues)})
 
 
 def _judge(issues: Sequence, spec: ProductSpec, thresholds, tracker_name: str,
