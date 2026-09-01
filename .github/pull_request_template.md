@@ -4,7 +4,7 @@ Closes #[ISSUE_NUMBER]
 
 ### Seat & Lane Information
 - **Seat**: [ ] SR1  [ ] SR2  [ ] JR1  [ ] JR2  [ ] Community Contributor
-- **Lane**: [ ] interface  [ ] service  [ ] data  [ ] platform  [ ] docs/framework
+- **Lane**: the `lane: <name>` label on this PR names it; `policy` for a change to the lane policy itself
 - **Capability Gate Executed**: [ ] Native Local Test Suite  [ ] Verified Script  [ ] Manual Verification
 
 ---

@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from .config import Config, UnknownLaneError
 from .lanes import LaneEngine, LaneValidationResult, LaneViolation
@@ -36,6 +36,18 @@ DEFAULT_LABEL_PREFIX = "lane:"
 
 #: Where the written workflow goes, relative to the repository root.
 WORKFLOW_PATH = Path(".github") / "workflows" / "lanekeeper-gate.yml"
+
+
+def policy_lane_paths() -> Tuple[str, ...]:
+    """Everything a change under the `policy` lane may touch.
+
+    The policy files themselves, plus the three files that only ever change alongside
+    them: the ignore rules `init` writes, the human record `divide --confirm` writes,
+    and this gate's own workflow. Without those, the pull request that introduces
+    lanekeeper to a project could not pass the gate it installs.
+    """
+    return tuple(paths.policy_paths()) + (
+        ".gitignore", "lanes.yaml", WORKFLOW_PATH.as_posix())
 
 
 class NoLaneError(ValueError):
@@ -107,11 +119,13 @@ def _check_policy_change(files: List[str]) -> LaneValidationResult:
     """A policy change may touch the policy files and nothing else."""
     allowed: List[str] = []
     violations: List[LaneViolation] = []
+    permitted = policy_lane_paths()
     for f in files:
         norm = LaneEngine.normalize_path(f)
         if LaneEngine.is_bookkeeping(norm):
             continue
-        if LaneEngine.is_policy(norm):
+        if LaneEngine.is_policy(norm) or any(
+                norm == p or (p.endswith("/") and norm.startswith(p)) for p in permitted):
             allowed.append(norm)
         else:
             violations.append(LaneViolation(filepath=norm, reason="not_allowed"))
@@ -162,7 +176,7 @@ def check_checkout(
                           f"(matched '{v.matched_pattern}').")
         elif lane_name == POLICY_LANE:
             errors.append(f"{v.filepath}: a policy change may touch only the policy files "
-                          f"({', '.join(paths.policy_paths())}).")
+                          f"({', '.join(policy_lane_paths())}).")
         else:
             errors.append(f"{v.filepath}: outside lane '{lane_name}'.")
     return CheckReport(lane=lane_name, base=base, head=head, result=result, errors=errors)

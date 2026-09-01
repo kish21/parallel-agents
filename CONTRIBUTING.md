@@ -44,7 +44,7 @@ git checkout -b feat/your-feature-name origin/main
 
 ## 🛡️ Working Agreement & Definition of Done
 
-All pull requests must satisfy our [01 — Working Agreement](01-working-agreement.md):
+All pull requests must stay inside one lane (`lanekeeper check` runs on every PR) and satisfy the [Working Agreement](docs/legacy/01-working-agreement.md):
 - [ ] Changes adhere to path boundaries and file structure.
 - [ ] No hardcoded secrets, tokens, or local environment variables.
 - [ ] Added or updated documentation in `README.md` / `CHANGELOG.md` where applicable.

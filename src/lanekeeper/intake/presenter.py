@@ -148,6 +148,12 @@ def _coverage_lines(result: IntakeResult) -> List[str]:
         "",
     ]
     lines += [f"     • {feature.name}" for feature in cov.uncovered]
+    lines += [
+        "",
+        "   That is a word match, not a judgement. If one of those is real missing",
+        "   work, product-playbook (" + ", ".join(PLAYBOOK_STEPS) + ") writes it down;",
+        "   if it is not a feature at all, ignore this line. Either way I carry on.",
+    ]
     return lines
 
 
@@ -226,18 +232,6 @@ def _next_lines(result: IntakeResult, has_issue_template: bool = False,
         return [
             "   Working out how this splits into groups is the next step, and",
             "   'lanekeeper divide' is the command that does it.",
-        ]
-
-    if result.coverage.verdict is CoverageVerdict.GAPS:
-        steps = "  then  ".join(PLAYBOOK_STEPS)
-        return [
-            "   Work that is not written down cannot be shared out. product-playbook",
-            "   is the tool that turns a gap like this into tickets:",
-            "",
-            f"     {steps}",
-            "",
-            "   Then run 'lanekeeper start' again and I will pick up from here.",
-            "   I have changed nothing in this project.",
         ]
 
     lines = [

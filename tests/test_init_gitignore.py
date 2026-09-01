@@ -77,6 +77,12 @@ class TestInitProtectsTheRepo(unittest.TestCase):
         self.assertNotEqual(
             git(["check-ignore", "-q", ".lanekeeper/config.yaml"], self.tmp).returncode, 0,
             "config.yaml must NOT be ignored — it is the shared lane policy")
+        (self.tmp / ".lanekeeper" / "capabilities").mkdir(parents=True, exist_ok=True)
+        (self.tmp / ".lanekeeper" / "capabilities" / "JR1.json").write_text("{}", encoding="utf-8")
+        self.assertNotEqual(
+            git(["check-ignore", "-q", ".lanekeeper/capabilities/JR1.json"], self.tmp).returncode, 0,
+            "the seat cards must NOT be ignored — the gate reads them; the first real "
+            "project could not commit them")
 
         # Everything else under .lanekeeper is machine-local.
         for ignored in [".lanekeeper/state/agents.json",

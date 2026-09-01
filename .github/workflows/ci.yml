@@ -4,7 +4,7 @@ on:
   # Every branch, not just main. Feature branches are where agents actually work, so
   # leaving them unchecked defeats the point of having a gate.
   #
-  # 06-free-tier-ops.md argues for restricting triggers to conserve the Actions
+  # docs/legacy/06-free-tier-ops.md argues for restricting triggers to conserve the Actions
   # allowance, but that section applies to *private* repositories. This repository is
   # public, where the same document records minutes as unmetered — so the restriction
   # bought nothing here except unverified branches.
@@ -38,8 +38,8 @@ jobs:
       - name: Verify required files exist
         run: |
           for f in README.md CONTRIBUTING.md SECURITY.md LICENSE CHANGELOG.md VERSION \
-                   01-working-agreement.md 02-conflict-management.md \
-                   03-orchestration.md 04-agent-setup.md; do
+                   docs/legacy/01-working-agreement.md docs/legacy/02-conflict-management.md \
+                   docs/legacy/03-orchestration.md docs/legacy/04-agent-setup.md; do
             test -f "$f" || { echo "missing: $f"; exit 1; }
           done
 

@@ -41,6 +41,18 @@ _DECORATION = re.compile(r"^[-*+•]\s+|^\[[ xX]\]\s*|[`'\",;]+")
 #: than part of it.
 _MAX_WORDS = 1
 
+#: Anything before the first letter or digit of a heading: emoji, numbering, dashes.
+_LEADING_DECORATION = re.compile(r"^[^a-z0-9]+")
+
+#: A markdown horizontal rule. GitHub's form and product-playbook both write `---`
+#: between fields, and a section runs to the next heading, so the rule sits inside it.
+_RULE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
+
+#: A backticked span. When a line carries one, the span is the path and the rest of the
+#: line is the label around it — the shape product-playbook writes:
+#: ``- [x] **Domain / Contracts:** `src/domain/contracts.ts` *(IssueContract)*``.
+_CODE_SPAN = re.compile(r"`([^`]+)`")
+
 
 def read(issue, settings) -> TicketBoundary:
     """One ticket's stated boundary, exactly as the filer wrote it."""
@@ -105,7 +117,11 @@ def _section(body: str, headings: Sequence[str]) -> List[str]:
         if title is not None:
             if collecting:
                 break
-            collecting = any(title.startswith(name) for name in wanted)
+            # A heading may carry an emoji or a number in front of its words —
+            # product-playbook writes "📁 Target Modules & Exact File Names" — and the
+            # words are what is being matched.
+            bare = _LEADING_DECORATION.sub("", title)
+            collecting = any(bare.startswith(name) for name in wanted)
             continue
         if collecting:
             collected.append(line)
@@ -148,13 +164,18 @@ def _paths(lines: Sequence[str]):
         stripped = line.strip()
         if not stripped or stripped.startswith("```") or stripped.startswith("~~~"):
             continue
-        path = normalise(stripped)
-        if path is None:
+        if _RULE.match(stripped):
+            continue
+        spans = _CODE_SPAN.findall(stripped)
+        candidates = spans if spans else [stripped]
+        found = [p for p in (normalise(c) for c in candidates) if p is not None]
+        if not found:
             ignored.append(stripped)
             continue
-        if path not in seen:
-            seen.add(path)
-            out.append(path)
+        for path in found:
+            if path not in seen:
+                seen.add(path)
+                out.append(path)
     return out, ignored
 
 

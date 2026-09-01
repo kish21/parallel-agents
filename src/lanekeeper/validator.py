@@ -80,7 +80,7 @@ class Validator:
         """Returns the first matching pattern, or None.
 
         A pattern ending in '/' is a directory prefix (the form used by the card examples
-        in 03-orchestration.md). `match_glob` reads it that way for lanes and gates alike,
+        in docs/legacy/03-orchestration.md). `match_glob` reads it that way for lanes and gates alike,
         so the two no longer disagree about what `secrets/` means.
         """
         for pattern in patterns:

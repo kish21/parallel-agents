@@ -10,6 +10,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.1] — 2026-09-01
+
+Everything here comes from the first end-to-end run on a real project —
+[kish21/mini-issue-tracker](https://github.com/kish21/mini-issue-tracker), a React app
+with a product-playbook `PRODUCT.md` and three product-playbook tickets. v0.7.0 stopped
+at step 1 with a false coverage gap and, with that switched off, read zero file paths
+out of all three tickets. Every item below was found by that run and is pinned by a test.
+
+### Fixed
+
+- **A coverage gap no longer stops `start`.** Coverage is a word match between a
+  feature's name and the tickets' text. It read three sub-bullets of one feature
+  ("Problem summary & context" …) as three missing features and refused to continue,
+  with no flag that could answer it. Nested bullets are now details, not features, and a
+  remaining gap is reported as advice — *"That is a word match, not a judgement"* — while
+  the run carries on.
+- **product-playbook's own ticket format is read.** Its file section is headed
+  *📁 Target Modules & Exact File Names* and each line is a checkbox with a bold label
+  and a backticked path. The heading's emoji hid it from the parser, and the label made
+  every line "prose". Headings are matched on their words; a line with backticked spans
+  yields those spans as paths; `target modules` and `target files` are default headings.
+- **A markdown rule (`---`) between form fields was read as a path** and written into
+  the lane. Rules are skipped.
+- **A single-ticket lane is named by the ticket's tag** (`[FEAT-02]` → `feat-02`), not
+  by one directory it happens to touch. The trial produced lanes called `prompt` and
+  `prompts`.
+- **The draft offers the shared zone a collision is asking for**, switched off, so the
+  fix for *"prompt and feat-02 both cover src/domain/contracts.ts"* is a matter of
+  deleting two characters rather than knowing the schema.
+- **A policy created by `divide --confirm` gets the same first-time setup as `init`:**
+  seat cards, ignore rules, the worktree directory. Without the cards, its default
+  capability gates refused every `spawn`.
+- **The seat cards are no longer gitignored.** The rules `init` wrote ignored
+  `.lanekeeper/capabilities/`, so the cards could never be committed and the gate had
+  nothing to read in CI.
+- **The `policy` lane may also touch `.gitignore`, `lanes.yaml` and the gate's own
+  workflow**, so the pull request that installs lanekeeper can pass the gate it installs.
+- **`check` finds the repository root from any subdirectory**, and when the checkout
+  has no policy it says why: the policy must be on the base branch before agents branch
+  from it.
+- **`cleanup` deletes the agent's branch when it is fully merged** and names it when it
+  is not. Branches used to accumulate forever, and a re-spawned agent silently resumed
+  an old one.
+- **The "no labels" quality flag is gone.** Nothing groups by label, so it complained
+  about a clue nobody used, on every real backlog.
+
+### Changed
+
+- **The README opens with five minutes, start to gate**, using the trial's real output.
+  The reference follows. The backend/frontend diagram is gone.
+- **The six process documents and the walkthrough moved to `docs/legacy/`** with a
+  note: they describe the pre-tool, layer-lane way of working. `init` now says out loud
+  that its detected lanes are technology layers and a starting point only. The `.lane`
+  template shows what `spawn` actually writes; the PR template asks for the `lane:`
+  label instead of a layer checkbox.
+
 ## [v0.7.0] — 2026-09-01
 
 ### Fixed — the boundary check now holds

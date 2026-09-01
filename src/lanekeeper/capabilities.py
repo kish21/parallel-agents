@@ -4,7 +4,7 @@ A lane answers *where* a seat may work. A capability card answers *what kind of 
 is competent to do there. Both fail closed: an undeclared seat, or a capability a card
 does not mention, stops the operation rather than permitting it.
 
-The card schema is the one specified in 03-orchestration.md, unchanged.
+The card schema is the one specified in docs/legacy/03-orchestration.md, unchanged.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from . import paths
 
 
 class CapabilityState(str, Enum):
-    """The three states from 03-orchestration.md §1.
+    """The three states from docs/legacy/03-orchestration.md §1.
 
     Two states would collapse the distinction that matters: a harness that *can* do
     something with a written procedure carries a very different risk from one that cannot

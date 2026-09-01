@@ -36,9 +36,10 @@ class TestQuality(unittest.TestCase):
         flag = next(f for f in flags if f.kind is FlagKind.NO_FILE_HINT)
         self.assertEqual(flag.issue_refs, ("1",))
 
-    def test_unlabelled_tickets_are_flagged(self):
+    def test_unlabelled_tickets_are_not_flagged(self):
+        """Nothing groups by label, so a missing label is not a defect to report."""
         flags = inspect([issue(1, "Checkout fix", labels=())], self.thresholds)
-        self.assertIn(FlagKind.NO_LABELS, kinds(flags))
+        self.assertNotIn(FlagKind.NO_LABELS, kinds(flags))
 
     def test_near_identical_titles_are_flagged_as_a_pair(self):
         flags = inspect(

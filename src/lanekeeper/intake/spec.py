@@ -25,7 +25,7 @@ from .models import Feature, ProductSpec, SpecSource
 #: `## Scope`, `### Plan — milestones`, `# Features`.
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 #: `- item`, `* item`, `1. item`, and task-list boxes.
-_BULLET = re.compile(r"^\s{0,3}(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$")
+_BULLET = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$")
 #: Trailing explanation after a feature's name. The dashes need a space in front of them
 #: (a hyphenated name is one word); a colon does not, because `Billing: Stripe checkout`
 #: is how most people write it.
@@ -99,6 +99,10 @@ def extract_features(text: str, section_names: List[str]) -> List[Feature]:
     # a sibling sub-section after it is back in scope, so suppression has to end.
     section_level: Optional[int] = None
     suppress_level: Optional[int] = None
+    # The indentation of the section's first bullet. A bullet indented deeper than that
+    # is a detail of the feature above it — "Problem summary", "Acceptance criteria" —
+    # not a feature of its own. Reading it as one produced gaps nothing could fill.
+    bullet_indent: Optional[int] = None
     in_fence = False
 
     for raw_line in text.splitlines():
@@ -123,6 +127,7 @@ def extract_features(text: str, section_names: List[str]) -> List[Feature]:
                 continue
             if any(_names_section(title, name) for name in wanted):
                 section_level = level
+                bullet_indent = None
             continue
 
         if section_level is None or suppress_level is not None:
@@ -130,6 +135,11 @@ def extract_features(text: str, section_names: List[str]) -> List[Feature]:
 
         bullet = _BULLET.match(raw_line)
         if not bullet:
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip())
+        if bullet_indent is None:
+            bullet_indent = indent
+        elif indent > bullet_indent:
             continue
         name = _feature_name(bullet.group(1))
         if not name:

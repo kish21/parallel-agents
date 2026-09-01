@@ -170,12 +170,14 @@ class TestResume(unittest.TestCase):
             import shutil
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_taking_it_as_is_never_overrides_a_coverage_gap(self):
+    def test_a_coverage_gap_is_reported_and_the_run_carries_on(self):
+        """A word-overlap gap is advice. It used to be a stop no flag could answer."""
         (self.root / "PRODUCT.md").write_text(
             "## Scope\n- Checkout\n- Billing\n", encoding="utf-8")
-        result = run_intake(self.root, self.settings, FakeTracker(self.issues),
-                            accept_as_is=True)
-        self.assertIs(result.verdict, Verdict.NEEDS_PLAYBOOK)
+        result = run_intake(self.root, self.settings, FakeTracker(self.issues))
+        self.assertIs(result.coverage.verdict, CoverageVerdict.GAPS)
+        self.assertEqual([f.name for f in result.coverage.uncovered], ["Billing"])
+        self.assertIs(result.verdict, Verdict.READY)
 
     def test_an_unreadable_tracker_is_not_an_empty_backlog(self):
         tracker = FakeTracker([], available=False, reason="not signed in")

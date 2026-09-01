@@ -212,7 +212,12 @@ class DivideConfig:
     #: Matched as a prefix, case-insensitively, so "Allowed File Paths (globs)" counts.
     #: Settable because a project whose form words the field differently should not have
     #: to rename the field to be understood.
-    path_headings: List[str] = field(default_factory=lambda: ["allowed file paths"])
+    path_headings: List[str] = field(default_factory=lambda: [
+        "allowed file paths",
+        # product-playbook's own heading for the same field.
+        "target modules",
+        "target files",
+    ])
     #: The heading carrying the ticket's own feature name, when the filer gave one.
     lane_headings: List[str] = field(default_factory=lambda: ["lane"])
     #: Directories that hold code but never name a feature.
@@ -337,7 +342,7 @@ class Config:
                     "FRONTEND_URL": "http://${HOST}:${FRONTEND_PORT}",
                 },
             ),
-            # The mechanical form of the rule in 01-working-agreement.md: stop when the
+            # The mechanical form of the rule in docs/legacy/01-working-agreement.md: stop when the
             # change touches money, auth, tenant isolation, or a migration.
             capability_gates={
                 "security_review": CapabilityGate(

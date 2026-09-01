@@ -1,5 +1,11 @@
 # Step 1 of `lanekeeper start`: is the work written down, and does it cover the features?
 
+> **Revised after the first real project (post-v0.7.0):** a coverage `GAPS` verdict no
+> longer stops the run. It is reported, with the features named and the words "a word
+> match, not a judgement", and `start` carries on. `CANNOT_JUDGE` and the tidiness
+> stops are unchanged. Where this document says a gap hands off to the playbook, read
+> "a gap is reported and the playbook is suggested".
+
 Issue: #37 · Step 1 of umbrella #36 · Blocks #38 · Resolves most of #30
 
 ## 1. The decision this builds to

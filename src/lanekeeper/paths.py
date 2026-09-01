@@ -199,12 +199,13 @@ def policy_paths(root: Optional[Path] = None) -> Tuple[str, ...]:
 def gitignore_lines(root: Optional[Path] = None) -> Tuple[str, ...]:
     """The .gitignore entries `init` writes for lanekeeper's own directory.
 
-    Everything in the directory is ignored except the configuration file,
-    which is the lane policy every agent is validated against and so belongs
-    in version control.
+    Everything in the directory is ignored except the policy: the configuration
+    file and the seat cards, which every agent is validated against and so belong
+    in version control. The cards used to be swept up by the ignore rule, so the
+    first real project could not commit them and the gate had nothing to read.
     """
     name = home_dirname(root)
     return (
         f"/{name}/*",
-        f"!/{name}/{CONFIG_FILENAME}",
+        f"!/{name}/{CONFIG_FILENAME}\n!/{name}/{CAPABILITIES_DIRNAME}/",
     )

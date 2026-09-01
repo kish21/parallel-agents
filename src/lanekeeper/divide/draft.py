@@ -77,6 +77,23 @@ def render(proposal: DivisionProposal, settings) -> str:
     for lane in proposal.lanes:
         lines += _lane_block(lane, wider.get(lane.name, ()))
 
+    shared = _shared_candidates(proposal)
+    if shared:
+        lines += [
+            "",
+            "# ---------------------------------------------------------------------",
+            "# These files are claimed by more than one entry above. Two agents on one",
+            "# file is the collision this whole exercise exists to prevent, so I will",
+            "# not write the split until it is settled. The usual answer is a shared",
+            "# zone: any entry may touch it, and a change there needs a second look.",
+            "# Remove the '# ' to declare it — or move the file to one entry's list.",
+            "# ---------------------------------------------------------------------",
+            "# shared:",
+            "#   common:",
+            "#     paths:",
+        ]
+        lines += [f"#       - {_scalar(path)}" for path in shared]
+
     if proposal.needs_paths:
         lines += [
             "",
@@ -142,6 +159,16 @@ def save(proposal: DivisionProposal, root: Path, settings,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render(proposal, settings), encoding="utf-8")
     return path, True
+
+
+def _shared_candidates(proposal: DivisionProposal) -> List[str]:
+    """Files that more than one entry claims, in the order they were reported."""
+    seen: List[str] = []
+    for overlap in proposal.overlaps:
+        for path in overlap.example_files:
+            if path not in seen:
+                seen.append(path)
+    return seen
 
 
 def _lane_block(lane: ProposedLane, wider: Sequence[str] = ()) -> List[str]:
@@ -337,7 +364,7 @@ def validate(lanes: Sequence[ProposedLane], files: Sequence[str], settings,
 
 
 def apply_to_config(document: dict, root: Path,
-                    project_name: str = "") -> Tuple[Path, Tuple[str, ...]]:
+                    project_name: str = "") -> Tuple[Path, Tuple[str, ...], bool]:
     """Puts the confirmed lanes where every other command reads them: `config.yaml`.
 
     `lanes.yaml` is the human record of who owns what, with `owner`, `shared` and the
@@ -350,11 +377,17 @@ def apply_to_config(document: dict, root: Path,
     A `claims: unowned` lane has no patterns to enforce — its boundary is every path
     nobody else claims, which the gate cannot express yet — so it is left out of the
     policy and its name is returned, for the confirmation to say so.
+
+    The third value says whether the policy file was created here. A brand-new one
+    needs the rest of a first-time setup — the seat cards its gates require, the
+    ignore rules — which is the caller's to do; this module only knows about lanes.
     """
+    created = False
     try:
         config = load_config(root)
     except FileNotFoundError:
         config = Config.default(project_name=project_name or Path(root).name)
+        created = True
     skipped = unowned_lanes(document)
     lanes = {}
     for name, body in ((document or {}).get("lanes") or {}).items():
@@ -367,7 +400,7 @@ def apply_to_config(document: dict, root: Path,
             deny=list(_paths_of(body.get("deny") or [])),
         )
     config.lanes = lanes
-    return save_config(config, root), skipped
+    return save_config(config, root), skipped, created
 
 
 def write_lane_file(document: dict, root: Path, settings,

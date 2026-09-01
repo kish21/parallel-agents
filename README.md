@@ -1,98 +1,26 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.1-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
-**Run multiple AI coding agents safely in the same repository.**
+**Run several AI coding agents on one repository without them colliding.**
 
-Lanekeeper gives each coding agent its own Git worktree, branch, ports, environment, and code boundaries, so agents can work at the same time without accidentally interfering with each other.
+Lanekeeper reads your tickets, divides the work into **lanes** — a feature, top to
+bottom, never a technology layer — gives each agent its own worktree, branch and ports
+inside one lane, and puts a **gate on every pull request** that fails any change which
+leaves its lane. The gate is a set intersection over file patterns. No model is
+consulted where the safety promise is made.
 
-```
-                    Your Repository
-                          │
-             ┌────────────┼────────────┐
-             │            │            │
-             ▼            ▼            ▼
-          Agent 1      Agent 2      Agent 3
-          Backend      Frontend     Tests
-             │            │            │
-          Worktree     Worktree     Worktree
-          Branch       Branch       Branch
-          Port 8001    Port 8002    Port 8003
-             │            │            │
-             └────────────┼────────────┘
-                          ▼
-                      Validate
-                          │
-                          ▼
-                         PRs
-```
+It is built to pair with [product-playbook](https://github.com/kish21/product-playbook),
+which writes the tickets. Product-playbook writes the work down; lanekeeper divides it up.
 
 ---
 
-## Why Lanekeeper?
+## Five minutes, start to gate
 
-AI coding agents are powerful, but running several agents in the same repository creates real operational problems:
-
-* **File Overwrites**: One agent can modify files another agent is actively working on.
-* **Port Clashes**: Two agents can accidentally claim the same development port.
-* **Cross-Talk**: Frontends can connect to another agent's uncommitted backend code.
-* **Migration Conflicts**: Shared database migrations can clash or create duplicate counters.
-* **Out-of-Scope Changes**: An agent can modify central configs, auth, or infrastructure outside its assigned task.
-* **Resource Leaks**: Failed agents can leave behind orphaned processes, blocked ports, or stale git state.
-
-Lanekeeper adds a mechanical coordination and safety layer around your coding agents to prevent these problems.
-
----
-
-## The Basic Idea
-
-There are four fundamental concepts:
-
-### 1. Agent
-An agent is an isolated worker session assigned to a specific task.
-```
-agent-001 → "Implement user authentication"
-```
-
-### 2. Worktree
-Each agent gets its own physical Git working directory.
-```
-Agent 1 → .lanekeeper/worktrees/agent-001
-Agent 2 → .lanekeeper/worktrees/agent-002
-Agent 3 → .lanekeeper/worktrees/agent-003
-```
-Agents never edit the same physical files simultaneously.
-
-### 3. Lane
-A lane defines which part of the codebase an agent is permitted to touch. A lane is a
-feature, top to bottom — not a tech layer.
-```yaml
-lane: checkout
-
-allow:
-  - src/api/checkout/**
-  - src/services/payments/**
-  - src/frontend/checkout/**
-  - tests/checkout/**
-
-deny:
-  - src/api/checkout/legacy/**
-```
-If the backend agent modifies `src/api/users.py`, that is allowed. If it touches `src/frontend/App.tsx`, validation reports a violation.
-
-### 4. Resources
-Each agent receives its own dedicated runtime resources:
-```
-Agent 1 → backend port 8001, frontend port 3001
-Agent 2 → backend port 8002, frontend port 3002
-Agent 3 → backend port 8003, frontend port 3003
-```
-This prevents agents from talking to the wrong development server.
-
----
-
-## 🚀 Quick Start
+Everything below is real output from running lanekeeper on
+[a small React project](https://github.com/kish21/mini-issue-tracker) with three open
+issues written by product-playbook.
 
 ### 1. Install
 
@@ -100,199 +28,134 @@ This prevents agents from talking to the wrong development server.
 pip install lanekeeper
 ```
 
-This installs the `lanekeeper` command. Check which build you have with:
-
-```bash
-lanekeeper --version
-```
-
-From a clone:
-
-```bash
-pip install -e .
-```
-
-### 2. Start here
-
-`lanekeeper start` is the guided way in. Before it sets anything up it asks the question
-everything else depends on: **is the work written down, and does it cover what this
-product is meant to do?** Every later step — how the work divides, who owns what, what
-the merge gate enforces — is derived from your issues, so dividing a backlog that is
-missing half the product produces a confident-looking split of nothing.
+### 2. Let it read your tickets
 
 ```
 $ lanekeeper start
 
-🛑 There is no written-down work in this project yet, so there is nothing
-   to share out between agents.
+✅ The work is written down: 3 pieces of work.
 
-   Run:  /vision  then  /scope  then  /plan
+   I compared them against the plan in PRODUCT.md, and every thing that document says
+   this product does has something written against it.
 
-   I have changed nothing in this project.
+📋 Here is how I would share out 3 pieces of work — 2 groups, one for each agent.
+
+   prompt  (#3, #1)
+       2 pieces of work name the same part of the project (prompt) in the
+       files they touch.
+       Files it would cover: src/components/features/IssueCard.tsx, ... (and 9 more)
+
+   feat-02  (#2)
+       Nothing else in the list points at the same part of the project.
+       Files it would cover: src/components/features/ClusterCard.tsx, ... (and 3 more)
+
+     • Two of these would be working on the same files. That is the one thing
+       here you cannot see by reading the list, so it is worth settling before
+       anybody starts:
+     • prompt and feat-02 both cover src/domain/contracts.ts.
+
+   I have written all of the above to .lanekeeper/start/lanes.draft.yaml.
 ```
 
-That is [product-playbook](https://github.com/kish21/product-playbook), the companion
-tool that works out what you are building and turns it into tickets. Lanekeeper divides
-work; it does not invent it.
+It reads GitHub Issues through `gh`. Each ticket's file list (the *Allowed File Paths*
+field of the issue form, or product-playbook's *Target Modules* section) is the
+boundary. Nothing is guessed: a ticket with no files is listed as unplaced, not invented.
+If there are no tickets at all and you are at a terminal, `start` opens Claude Code on
+product-playbook's `/vision` and picks up when you are done.
 
-When there *is* work written down, `start` compares it against the product description —
-`PRODUCT.md` first, a README second — and reports which features have nothing written
-against them. When there is nothing to compare against, it says exactly that, rather than
-dressing a guess up as a verdict:
+### 3. Confirm the split
 
-```
-📋 I found 12 pieces of work written down.
+Edit the draft if you disagree — join two entries, rename one, add a missing file. The
+draft already contains the fix for the collision above, switched off:
 
-   I count 12 pieces of work and I cannot tell whether that is
-   all of them, because this project has nothing written down that says
-   what it is meant to do. I am not going to guess.
-```
-
-Answer it with `--take-as-is` if what is there is the whole job. Fix your issues and run
-`start` again and it carries on from where it stopped rather than starting over. Read the
-same check on its own with `lanekeeper intake`.
-
-Where your work is read from is configuration, not an assumption. GitHub Issues is the
-default; the section lives in `config.yaml` under `intake`, along with which documents
-describe your product and every threshold the check judges by.
-
-When there is nothing written down and you are at a terminal, `start` does not stop at
-the advice: it opens Claude Code in the project with `/vision` as the opening prompt,
-waits for you to finish `/scope` and `/plan` there, and looks at the tickets again when
-you exit. `--no-handoff` keeps it to printing the steps.
-
-After the pre-flight, `start` proposes how the work divides and writes the proposal as a
-draft for you to edit; `lanekeeper divide --confirm` re-checks what you wrote and makes
-it the policy every agent is held to. `init` below is the direct route if you already
-know how you want the work divided.
-
-**The board.** `lanekeeper board` creates the GitHub project board with Lane, Owner and
-Seat fields, `lane:` labels and milestones, all generated from `config.yaml` so the board
-carries the same lane names the gate enforces. It needs `gh` with the `project` scope.
-`board --show` reads every card back. With `board.read: true` in the configuration, a
-card's Lane outranks the ticket form when the work is divided, and
-`lanekeeper spawn --ticket 12` takes the agent's lane and seat from the card.
-
-**The advisor.** Set `divide.advisor: claude-code` and, for a ticket that names no files
-and that nothing in the code matches, lanekeeper asks Claude Code headless (`claude -p`,
-on your own login, no API key) which files it probably touches. The answer is filtered to
-paths that exist and lands in the draft switched off for you to confirm. The gate never
-consults a model.
-
-### 3. Initialize the Repository
-
-`init` reads your repository and generates lanes that match its actual structure, then
-reports how much of the tree they cover:
-
-```
-$ lanekeeper init
-🧭 Detected 3 lanes from the repository layout: backend, frontend, platform
-   Coverage: 100% of 412 tracked files fall inside a lane.
+```yaml
+# shared:
+#   common:
+#     paths:
+#       - src/domain/contracts.ts
 ```
 
-If coverage is low it says so, rather than letting you discover it when validation reports
-legitimate work as out-of-lane. Use `--generic` to keep the starter lanes instead.
+Uncomment it, then:
 
-From your project root:
-```bash
-lanekeeper init
 ```
-This creates the `.lanekeeper/` configuration and state directories.
+$ lanekeeper divide --confirm
 
-Lanekeeper keeps its own files in one directory. To put them somewhere else,
-set `LANEKEEPER_HOME` to a directory name relative to the repository root
-before running any command:
+✅ Written down: 2 groups of work, each with its own set of files.
 
-```bash
-export LANEKEEPER_HOME=.agents
+   The record is lanes.yaml. It is yours to edit from here.
+   The same groups are now the 'lanes' in .lanekeeper/config.yaml, which is what
+   'spawn', 'validate' and 'check' hold every agent to.
 ```
 
-Everything lanekeeper writes moves with it — config, state, logs, capability
-cards, the default worktree location, and the rules `init` adds to
-`.gitignore`. Absolute paths and paths containing `..` are rejected, so the
-directory always stays inside the repository.
+Commit `.lanekeeper/` and `lanes.yaml`. That is the policy.
 
-### 4. Create an Agent
-```bash
-lanekeeper spawn \
-  --name backend-1 \
-  --lane backend \
-  --task "Implement user authentication"
+### 4. Give an agent a desk
+
 ```
-Lanekeeper provisions the isolated worktree, branch, `.env`, and dedicated ports automatically (and optionally starts an agent execution process when `--command` is supplied).
+$ lanekeeper spawn --lane feat-02 --task "#2 clustering engine" --open
 
-### 5. Create Another Agent
-```bash
-lanekeeper spawn \
-  --name frontend-1 \
-  --lane frontend \
-  --task "Build the login interface"
-```
-Now both agents can work simultaneously without collision.
-
-### 6. Check Agents
-```bash
-$ lanekeeper status
-
-📋 LANEKEEPER — MY-PROJECT
-
-Agent ID     Name           Seat   Lane         Status     Ports            Task
-----------------------------------------------------------------------------------------------------
-agent-001    backend-1      SR1    backend      RUNNING    8001/3001        Implement user authentication
-agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Build the login interface
+🚀 Agent 'worker-1' (agent-001) successfully spawned!
+  • Worktree: .lanekeeper/worktrees/agent-001
+  • Branch:   parallel/agent-001/2-clustering-engine
+  • Lane:     feat-02
+  • Ports:    backend: 8001, frontend: 3001
+🪟 Opened agent-001 in the editor
 ```
 
-### 7. Validate an Agent's Work
-```bash
-$ lanekeeper validate agent-001
+`--open` launches your editor (`code` by default) on the worktree. The worktree's
+`.lane` file tells the agent its lane, its task and the exact paths it may touch:
 
-🛡️ VALIDATION REPORT: backend-1 (agent-001)
-Lane: backend
-
-  [Lane Compliance]
-    ✓ All 4 changed files are within allowed lane paths.
-
-==================================================
-✅ VALIDATION PASSED: PR is safe to submit and merge.
+```
+LANE='feat-02'
+TASK='#2 clustering engine'
+ALLOW='src/components/features/ClusterCard.tsx src/domain/contracts.ts src/prompts/clusteringPrompt.ts ...'
 ```
 
-### 8. Inspect Changed Files
-```bash
-lanekeeper diff agent-001
-```
+Point the agent at it: *"Read `.lane` before you start. Stay inside `ALLOW`."*
 
-### 9. Open the Agent's Desk
-```bash
-lanekeeper open agent-001          # or: lanekeeper spawn ... --open
-```
-Opens the worktree in your editor — `code` by default, set under `editor:` in
-`config.yaml`. The worktree's `.lane` file names the lane, the task, and the exact
-`ALLOW` and `DENY` patterns, so an agent told "read `.lane`" knows its boundary.
-
-### 10. Gate Every Pull Request
-```bash
-lanekeeper check --write-workflow  # writes .github/workflows/lanekeeper-gate.yml
-```
-`validate` is what you run by hand. `check` is the same lane engine run by CI on every
-pull request, with **no agent state needed**: it reads the lane from a `lane: <name>`
-label on the pull request and fails if any changed file is outside it. No label, no
-pass. Run it yourself on a branch with:
+### 5. Put the gate on every pull request
 
 ```bash
-lanekeeper check --lane checkout --base origin/main
+lanekeeper check --write-workflow    # writes .github/workflows/lanekeeper-gate.yml
 ```
 
-### 11. Stop an Agent
-```bash
-lanekeeper stop agent-001
+Commit it. From then on every PR needs exactly one `lane: <name>` label, and the gate
+fails any file outside that lane. Here is the agent above straying into `src/App.tsx`:
+
+```
+$ lanekeeper check --lane feat-02 --base origin/main
+
+🛡️  LANE CHECK — lane 'feat-02', origin/main...HEAD
+
+  ✗ src/App.tsx: outside lane 'feat-02'.
+
+❌ CHECK FAILED: this change leaves its lane.
 ```
 
-### 12. Clean Up Safely
-```bash
-lanekeeper cleanup agent-001
-```
+Revert the stray file and the same command prints `✅ CHECK PASSED`. A rename out of
+another lane, a deleted file that was not yours, an edit to the policy itself: all
+caught. A PR that changes the policy files carries the reserved label `lane: policy`.
+
+### What it does not do
+
+- It does not invent work. No tickets, no lanes; it hands you to product-playbook.
+- It does not stop an agent typing outside its lane. It stops the change merging.
+- It does not judge with a model. The optional advisor (`divide.advisor: claude-code`)
+  only suggests file paths for a ticket that names none, and its suggestion lands in the
+  draft switched off for you to confirm.
+
+### Where the board fits
+
+`lanekeeper board` creates a GitHub project board with Lane, Owner and Seat fields and
+the `lane:` labels, generated from your policy so the names agree. With `board.read:
+true` a card's Lane outranks the ticket text, and `lanekeeper spawn --ticket 12` takes
+the agent's lane and seat from the card. It needs `gh` with the `project` scope.
 
 ---
+
+# Reference
+
+Everything below is the full reference. The five minutes above is all a first run needs.
 
 ## How It Works
 
@@ -534,7 +397,7 @@ auth file — **even when that file is inside its lane**:
 ❌ VALIDATION FAILED: Must resolve errors before merging.
 ```
 
-This is the mechanical form of the rule in `01-working-agreement.md`: stop when the change
+This is the mechanical form of the rule in `docs/legacy/01-working-agreement.md`: stop when the change
 touches money, auth, tenant isolation, or a migration.
 
 ### It fails closed, in four ways
@@ -742,7 +605,7 @@ swapping vendors edits one field and changes nothing else.
 | :--- | :--- |
 | **`lanekeeper start`** | Guided setup. Checks that the work is written down and covers the product before anything else runs. |
 | **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
-| **`lanekeeper init`** | Initializes repository and creates configuration. The direct route if you already know your lanes. |
+| **`lanekeeper init`** | The escape hatch: writes a policy with lanes detected from the directory layout (technology layers, not features). Use `start` unless you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
 | **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket` reads lane and seat from the board; `--open` opens the editor. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
@@ -845,13 +708,11 @@ run.
 
 | Document | Description |
 | :--- | :--- |
-| **[🎬 End-to-End Walkthrough](https://github.com/kish21/parallel-agents/blob/main/EXAMPLES.md)** | Step-by-step lifecycle of Ticket #102 from assignment to merge. |
-| **[01. Working Agreement](https://github.com/kish21/parallel-agents/blob/main/01-working-agreement.md)** | Definition-of-Done, path boundary contracts, and merge discipline. |
-| **[02. Conflict Management](https://github.com/kish21/parallel-agents/blob/main/02-conflict-management.md)** | Worktree deep-dive, port tables, and Disaster Recovery Runbook. |
-| **[03. Orchestration](https://github.com/kish21/parallel-agents/blob/main/03-orchestration.md)** | Capability cards, scaling 2→4→6 seats, and ROI metrics. |
-| **[04. Agent Setup](https://github.com/kish21/parallel-agents/blob/main/04-agent-setup.md)** | Prompts for Senior/Junior agents and token cost hygiene. |
-| **[05. GitHub Mechanics](https://github.com/kish21/parallel-agents/blob/main/05-github-mechanics.md)** | Board custom fields, disjoint milestones, and single-account routing. |
-| **[06. Free-Tier Operations](https://github.com/kish21/parallel-agents/blob/main/06-free-tier-ops.md)** | CI minute optimization, public vs private repo trade-offs, and verified mirrors. |
+| **[The lane file](docs/start-step2-divide.md)** | How `start` reads the tickets, proposes the split, and what `--confirm` writes. |
+| **[The pre-flight](docs/start-step1-intake.md)** | What `start` checks before it divides anything. |
+| **[The ticket form](docs/ticket-template.md)** | Why Allowed File Paths is the one required field. |
+| **[Capability gates](specs/capability-gates.md)** | The seat cards and the three-state capability model. |
+| **[Legacy process docs](docs/legacy/README.md)** | The pre-tool, layer-lane way of working. History, not instructions. |
 
 ---
 
