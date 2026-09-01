@@ -30,6 +30,9 @@ from .config import Config, UnknownLaneError, load_config, save_config
 from .doctor import Doctor
 from . import paths
 from .frameworks import default_url_templates
+from .intake import run_intake
+from .intake.presenter import render
+from .trackers import UnknownTrackerError, get_tracker
 from .layout import detect_layout, measure_coverage
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
@@ -37,6 +40,86 @@ from .ports import PortManager
 from .state import AgentState, AgentStatus, StateManager
 from .validator import Validator
 from .worktree import WorktreeManager
+
+
+def _config_for_start(root: Path) -> Config:
+    """The configuration `start` reads, defaulted when the project has none.
+
+    Step 1 runs before anything is set up, so a project with no configuration file is
+    the normal case rather than an error. Nothing is written: the defaults exist only
+    for the duration of the run.
+    """
+    try:
+        return load_config(root)
+    except FileNotFoundError:
+        return Config.default(project_name=root.name)
+
+
+#: Where GitHub looks for issue templates: the directory form, and both spellings of
+#: the legacy single-file form, which differ on a case-sensitive filesystem.
+ISSUE_TEMPLATE_FILES = ("ISSUE_TEMPLATE.md", "issue_template.md")
+
+
+def _has_issue_template(root: Path) -> bool:
+    """Whether this project already asks for the fields step 1 wishes tickets had."""
+    template_dir = root / ".github" / "ISSUE_TEMPLATE"
+    try:
+        if template_dir.is_dir() and any(template_dir.iterdir()):
+            return True
+    except OSError:
+        # An unreadable directory is not worth failing a report over; the hint it feeds
+        # is a nicety, not the answer.
+        pass
+    return any((root / ".github" / name).is_file() for name in ISSUE_TEMPLATE_FILES)
+
+
+def _run_step1(args: argparse.Namespace) -> int:
+    """Step 1 of `lanekeeper start`: is the work written down, and does it cover
+    the features? See docs/start-step1-intake.md and issue #37."""
+    root = Path.cwd()
+    try:
+        config = _config_for_start(root)
+    except ValueError as exc:
+        # A value in the configuration cannot be used as written. This is the first
+        # command a new user runs, so it says which setting and why, not a traceback.
+        print(f"❌ {exc}", file=sys.stderr)
+        return 1
+    try:
+        tracker = get_tracker(config.intake, root)
+    except UnknownTrackerError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 1
+
+    result = run_intake(
+        root,
+        config.intake,
+        tracker,
+        use_record=not getattr(args, "fresh", False),
+        accept_as_is=getattr(args, "take_as_is", False),
+    )
+    print()
+    print(render(result, has_issue_template=_has_issue_template(root)))
+    return 0 if result.passed else 1
+
+
+def cmd_intake(args: argparse.Namespace) -> int:
+    """The step-1 gate, run on its own so it can be repeated after fixing tickets."""
+    return _run_step1(args)
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    """The guided entry point. Runs the pre-flight, then stops.
+
+    The later steps — grouping the work, creating the board, preparing each agent — are
+    issues #38 to #41 and are not built. `start` says so rather than implying it did
+    something it did not.
+    """
+    code = _run_step1(args)
+    if code == 0:
+        print("   The remaining steps of 'start' are not built yet. Until they are,")
+        print("   'lanekeeper init' is the low-level way to set this project up if you")
+        print("   already know how you want the work divided.")
+    return code
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -721,6 +804,19 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # init
+    # The guided entry point. `init` is unchanged and stays available for someone who
+    # already knows how they want the work divided.
+    p_start = subparsers.add_parser(
+        "start", help="Guided setup: start here if you are not sure what to run")
+    _add_step1_flags(p_start)
+    p_start.set_defaults(func=cmd_start)
+
+    p_intake = subparsers.add_parser(
+        "intake",
+        help="Check that this project's work is written down and covers its features")
+    _add_step1_flags(p_intake)
+    p_intake.set_defaults(func=cmd_intake)
+
     p_init = subparsers.add_parser("init", help="Initialize lanekeeper in current Git repository")
     p_init.add_argument("--name", help="Project name")
     p_init.add_argument("--force", action="store_true", help="Overwrite existing configuration")
@@ -795,6 +891,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_cln.set_defaults(func=cmd_cleanup)
 
     return parser
+
+
+def _add_step1_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--take-as-is", action="store_true",
+        help="Treat the work that is written down as the whole job and carry on")
+    parser.add_argument(
+        "--fresh", action="store_true",
+        help="Ignore what a previous run decided and check again from scratch")
 
 
 def main() -> None:

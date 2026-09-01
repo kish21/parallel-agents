@@ -112,7 +112,55 @@ From a clone:
 pip install -e .
 ```
 
-### 2. Initialize the Repository
+### 2. Start here
+
+`lanekeeper start` is the guided way in. Before it sets anything up it asks the question
+everything else depends on: **is the work written down, and does it cover what this
+product is meant to do?** Every later step — how the work divides, who owns what, what
+the merge gate enforces — is derived from your issues, so dividing a backlog that is
+missing half the product produces a confident-looking split of nothing.
+
+```
+$ lanekeeper start
+
+🛑 There is no written-down work in this project yet, so there is nothing
+   to share out between agents.
+
+   Run:  /vision  then  /scope  then  /plan
+
+   I have changed nothing in this project.
+```
+
+That is [product-playbook](https://github.com/kish21/product-playbook), the companion
+tool that works out what you are building and turns it into tickets. Lanekeeper divides
+work; it does not invent it.
+
+When there *is* work written down, `start` compares it against the product description —
+`PRODUCT.md` first, a README second — and reports which features have nothing written
+against them. When there is nothing to compare against, it says exactly that, rather than
+dressing a guess up as a verdict:
+
+```
+📋 I found 12 pieces of work written down.
+
+   I count 12 pieces of work and I cannot tell whether that is
+   all of them, because this project has nothing written down that says
+   what it is meant to do. I am not going to guess.
+```
+
+Answer it with `--take-as-is` if what is there is the whole job. Fix your issues and run
+`start` again and it carries on from where it stopped rather than starting over. Read the
+same check on its own with `lanekeeper intake`.
+
+Where your work is read from is configuration, not an assumption. GitHub Issues is the
+default; the section lives in `config.yaml` under `intake`, along with which documents
+describe your product and every threshold the check judges by.
+
+The rest of `start` — grouping the work, filling in the board, opening a window per agent
+— is being built. Until it lands, `init` below is the direct route if you already know
+how you want the work divided.
+
+### 3. Initialize the Repository
 
 `init` reads your repository and generates lanes that match its actual structure, then
 reports how much of the tree they cover:
@@ -145,7 +193,7 @@ cards, the default worktree location, and the rules `init` adds to
 `.gitignore`. Absolute paths and paths containing `..` are rejected, so the
 directory always stays inside the repository.
 
-### 3. Create an Agent
+### 4. Create an Agent
 ```bash
 lanekeeper spawn \
   --name backend-1 \
@@ -154,7 +202,7 @@ lanekeeper spawn \
 ```
 Lanekeeper provisions the isolated worktree, branch, `.env`, and dedicated ports automatically (and optionally starts an agent execution process when `--command` is supplied).
 
-### 4. Create Another Agent
+### 5. Create Another Agent
 ```bash
 lanekeeper spawn \
   --name frontend-1 \
@@ -163,7 +211,7 @@ lanekeeper spawn \
 ```
 Now both agents can work simultaneously without collision.
 
-### 5. Check Agents
+### 6. Check Agents
 ```bash
 $ lanekeeper status
 
@@ -175,7 +223,7 @@ agent-001    backend-1      SR1    backend      RUNNING    8001/3001        Impl
 agent-002    frontend-1     JR1    frontend     RUNNING    8002/3002        Build the login interface
 ```
 
-### 6. Validate an Agent's Work
+### 7. Validate an Agent's Work
 ```bash
 $ lanekeeper validate agent-001
 
@@ -189,17 +237,17 @@ Lane: backend
 ✅ VALIDATION PASSED: PR is safe to submit and merge.
 ```
 
-### 7. Inspect Changed Files
+### 8. Inspect Changed Files
 ```bash
 lanekeeper diff agent-001
 ```
 
-### 8. Stop an Agent
+### 9. Stop an Agent
 ```bash
 lanekeeper stop agent-001
 ```
 
-### 9. Clean Up Safely
+### 10. Clean Up Safely
 ```bash
 lanekeeper cleanup agent-001
 ```
@@ -636,7 +684,9 @@ swapping vendors edits one field and changes nothing else.
 
 | Command | Purpose |
 | :--- | :--- |
-| **`lanekeeper init`** | Initializes repository and creates configuration. |
+| **`lanekeeper start`** | Guided setup. Checks that the work is written down and covers the product before anything else runs. |
+| **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
+| **`lanekeeper init`** | Initializes repository and creates configuration. The direct route if you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
 | **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
