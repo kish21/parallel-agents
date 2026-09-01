@@ -59,7 +59,7 @@ lifecycle. Verified against a real full-stack application.
 README with a fully worked 17-lane example in `examples/feature-lanes.yaml`. Nothing
 reads that file yet; it is the contract steps 2–4 will write to.
 
-**In review (#37, step 1 of the #36 umbrella — PR #45):** `lanekeeper start` and
+**Merged (#37, step 1 of the #36 umbrella — PR #45):** `lanekeeper start` and
 `lanekeeper intake` — the pre-flight gate. Design doc:
 [`docs/start-step1-intake.md`](docs/start-step1-intake.md).
 
@@ -78,8 +78,8 @@ reads that file yet; it is the contract steps 2–4 will write to.
 
 | Step | What it does | Issue | State |
 |---|---|---|---|
-| 1 | Is the work written down, and does it cover the features? | #37 | **done — PR #45** |
-| 2 | Group the features into modules — from the issues, or from the code | #38 | **next** |
+| 1 | Is the work written down, and does it cover the features? | #37 | **done — PR #45, merged** |
+| 2 | Divide the work: group where it groups, otherwise ask which tickets to hand out | #38 | **next — rewritten, see below** |
 | 3 | Separate a dependency from a collision; fuse or share | #39 | not started |
 | 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | not started |
 | 5 | Ask how many agents exist and how many to activate now | #33 | not started |
@@ -88,46 +88,114 @@ reads that file yet; it is the contract steps 2–4 will write to.
 
 ---
 
-## NEXT SESSION PLAN — #38, step 2: group the features into modules
+## The design decisions of 2026-09-01 that #38 was rebuilt around
+
+Posted on [#38](https://github.com/kish21/parallel-agents/issues/38#issuecomment-5494124416)
+and [#36](https://github.com/kish21/parallel-agents/issues/36#issuecomment-5494126576) so
+they stop being re-derived. Read the #38 comment, **not** its description, which is stale.
+
+**The prerequisite is the ticket template, not a `PRODUCT.md`.** A ticket filed through
+`.github/ISSUE_TEMPLATE/task.yml` already names the files it touches, so it carries its
+own boundary and nothing needs comparing against a spec. Coverage-against-a-document is
+a **greenfield question only** — demanding a `PRODUCT.md` from a project that already has
+a backlog is asking the user to write a document to satisfy a checker. #37 already
+behaves correctly here (`CANNOT_JUDGE` → `NEEDS_TIDYING` → `--take-as-is`); nothing in it
+needs undoing.
+
+**When lanekeeper cannot group the tickets, it ASKS.** It never blocks and never guesses.
+It shows the tickets and asks which ones to hand to a separate agent — the user knows the
+product, we do not. Three consequences:
+
+- **A lane can be a SINGLE TICKET**, bounded by that ticket's Allowed File Paths.
+  Grouping into modules is the nice case, not the required one.
+- **The mechanical collision check moves into #38**, earlier than #39 planned: he picks,
+  lanekeeper says whether any two picks touch the same files, he adjusts. A set
+  intersection over globs — no model, no judgement. #39 keeps the harder question
+  (dependency or collision; fuse or share a zone).
+- **A picked ticket with NO file paths has nothing to enforce.** Ask for the paths or
+  propose some for confirmation; never hand over an agent whose safety guarantee
+  quietly does not exist.
+
+---
+
+## Session of 2026-09-01 (this one): the ticket form — PR #46
+
+**Done.** PR #45 merged (#37 closed). #38 and #36 rewritten as comments. Then one
+subtask: the ticket form stopped asking for a technology layer.
+
+`Lane` was a dropdown of `interface / service / data / platform` — the model #23 and the
+README reject, in the one place the user *has* to fill in. Now free text and **optional**;
+`Allowed File Paths` is the **required** field in its place, in `bug.yml` too, which never
+asked for it. Six files, not two: `templates/issue-template-*.yml` ship to users and had
+drifted, `CONTRIBUTING.md` taught the enum before the form, `05-github-mechanics.md` told
+readers to *build* the dropdown. Design doc:
+[`docs/ticket-template.md`](docs/ticket-template.md); guard:
+`tests/test_issue_template.py`. No `src/` change.
+
+**PR #46 does not say `Closes #23`** — deliberately. `layout.py`'s `ROLE_BY_DIR_NAME` is
+the other, larger half of #23 and is #38's to displace. The tickets stop teaching layers;
+the detection has not.
+
+---
+
+## NEXT SESSION PLAN — #38, step 2: divide the work
 
 **Do this and only this.** It is the step the whole tool rests on.
 
 **How to resume**
 
-1. `git checkout main && git pull` — PR #45 (#37) should be merged first.
-2. Read `docs/start-step1-intake.md` for the shape step 2 inherits, then issue #38.
-3. Step 2 is handed an `IntakeResult` (`lanekeeper.intake.models`) — the issues, the
-   product description that was read, and which features matched which tickets. That is
-   the contract; do not re-read the tracker from step 2.
-4. Write `docs/start-step2-modules.md` (exit criteria, interaction map, test plan)
+1. `git checkout main && git pull` — PR #46 should be merged first.
+2. Read the **#38 rewrite comment**, then `docs/ticket-template.md` (the input contract),
+   then `docs/start-step1-intake.md` for the shape step 2 inherits.
+3. Step 2 is handed an `IntakeResult` (`lanekeeper.intake.models`). **Do not re-read the
+   tracker from step 2.**
+4. Write `docs/start-step2-divide.md` (exit criteria, interaction map, test plan)
    **before** coding, and confirm it with the user.
 
 **What #38 must get right**
 
-- The proposal is **feature slices, never backend/frontend**. `layout.py`'s
-  `ROLE_BY_DIR_NAME` must stop being the default (#23).
-- Two sources: the issues on a new project, the **code** on a half-built one. Where both
-  exist, use both and say which source each module came from. If the user is unsure,
-  go and read the code — that is the fallback, not an error.
+- Feature slices, never backend/frontend. `layout.py`'s `ROLE_BY_DIR_NAME` must stop
+  being the default (#23) — this is where that happens.
+- Two sources: the tickets on a new project, the **code** on a half-built one. Where both
+  exist use both and say which source each came from. If the user is unsure, go and read
+  the code — that is the fallback, not an error.
 - **Propose, then confirm.** Never a blank form; never a silent decision.
-- Every issue lands in exactly one module or in an explicit "could not place these" list.
-- Confirmed output is written to the lane file (#34) before #39 runs.
+- A backlog that does not group produces a **pick list**, not a stop.
+- Every ticket lands in exactly one entry or an explicit "could not place these" list.
+- Report any two picks touching the same files, before writing the lane file (#34).
 - Run against MarkVid, the proposal should be recognisably its 17 lanes.
 
-**Constraints that carry over from this session**
+**Two things this session found and left for #38** (both in `docs/ticket-template.md` §7)
+
+- `intake.quality`'s `broad_ticket_areas` defaults to **3**, but a correct feature slice
+  spans `backend` + `frontend` + `tests` — exactly 3. The default sits on the boundary of
+  the model the form now teaches. Measured: current placeholders do not trip it, one more
+  line does. It is config; decide what it should be now a lane spans the stack by design.
+- **Asking for missing file paths is #38's job.** A draft of `bug.yml` promised the filer
+  would "be asked about" — nothing does that, and `quality._file_hints` scans the whole
+  body, so a stack trace in the Evidence field supplies a path and no flag is raised at
+  all. The promise was cut rather than faked.
+
+**Constraints that carry over**
 
 - **Never tell the user to restructure their repository.** Lanes are globs and can carve
-  a feature slice out of a messy tree without moving a file. Propose over the tree as it
-  stands; at most *mention* that a tidier layout would sharpen things. Anything stronger
-  locks out the legacy projects that need this most.
+  a feature slice out of a messy tree without moving a file. At most *mention* that a
+  tidier layout would sharpen things. Anything stronger locks out the legacy projects
+  that need this most. `tests/test_issue_template.py` guards this in the form's wording.
+- **The gate never calls a model.** Enforce with rules, propose with intelligence. A
+  verdict that changes between runs is not a guarantee. Any advisor sits behind
+  `advisor: none` by default.
 - `check` is #31's name. Do not reuse it.
-- No hardcoding: sources, paths and thresholds are config; externals sit behind a
-  provider interface.
-- Plain language in every user-facing string — the user should not need to know what a
-  lane or a worktree is. `intake/presenter.py` and `test_intake_language.py` are the
-  pattern to copy.
+- No hardcoding: sources, paths and thresholds are config; externals behind a provider
+  interface (`src/lanekeeper/trackers/`).
+- Plain language in every user-facing string. `intake/presenter.py` and
+  `test_intake_language.py` are the pattern to copy.
 
-**Blockers:** none. #38 depends only on #37, which is done.
+**Blockers:** none. #38 depends on #37 (merged) and on PR #46 (open).
+
+**Known local noise:** `test_ports`, `test_cleanup` and `test_state_lock` fail on this
+Windows machine with `os.replace` `PermissionError`. Confirmed pre-existing on clean
+`main`; CI's windows-latest is green. Not a regression — do not chase it.
 
 ---
 
