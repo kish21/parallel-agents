@@ -147,7 +147,7 @@ two workflows above with a direct link. Its inputs live in `bootstrap.conf`; not
 particular repository is baked into the script.
 
 ```
-cp bootstrap.conf.example bootstrap.conf   # edit the lanes to match your paths
+lanekeeper board --dry-run                  # inputs are generated from .lanekeeper/config.yaml
 ./bootstrap.sh --check                     # report the current state, change nothing
 ./bootstrap.sh
 ```

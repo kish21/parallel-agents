@@ -254,7 +254,9 @@ Never a blank form, never a silent decision, and no interactive prompt to test a
    **what the user actually wrote** (placement, empty boundaries, collisions), and on a
    clean result writes `lanes.yaml` and says what it wrote. A collision or an empty
    boundary is reported and `lanes.yaml` is not written — the user adjusts and confirms
-   again.
+   again. *(v0.7.0: confirming also writes the lanes into `config.yaml`, the policy
+   `spawn`, `validate` and `check` read. `lanes.yaml` is the human record; the policy
+   file is what is enforced.)*
 
 Two rules hold this together, both learned from the review of this step:
 

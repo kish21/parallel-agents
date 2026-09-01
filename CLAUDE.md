@@ -3,7 +3,7 @@
 Project instructions and build state. Read this first; it exists so each session stops
 re-deriving the same decisions from the issue tracker.
 
-Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.6.0.
+Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.0.
 
 ---
 
@@ -85,8 +85,8 @@ Design doc: [`docs/ticket-template.md`](docs/ticket-template.md).
 | 1 | Is the work written down, and does it cover the features? | #37 | **done — PR #45, merged** |
 | 2 | Divide the work: group where it groups, otherwise ask which tickets to hand out | #38 | **done — PR #47, open** |
 | 3 | Separate a dependency from a collision; fuse or share | #39 | **frozen** — see the later session below |
-| 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | **next** — `bootstrap.sh` exists, unwired |
-| 5 | Ask how many agents exist and how many to activate now | #33 | not started |
+| 4 | Create the board and fill Lane, Owner, Seat on every card | #40 | **done** — `lanekeeper board`, `board.read`, `spawn --ticket`; unverified against a live board |
+| 5 | Ask how many agents exist and how many to activate now | #33 | not started — `spawn --ticket` covers the per-agent half |
 | 6 | Prepare a desk per activated agent | #41 | **done** — `open`, `spawn --open` |
 | 7 | Enforce the boundary on every change (`check`, the PR gate) | #31, #32 | **done** — `check --write-workflow` |
 
@@ -187,21 +187,45 @@ guided path was three steps of heuristics away from anything a user could see.
 - `lanekeeper open` and `spawn --open` (`src/lanekeeper/desk.py`) — the desk (#41).
   `editor.command` in config, default `code`. `.lane` now carries `TASK`, `ALLOW`, `DENY`.
 
-**The new order, decided with the user:**
+**The new order, decided with the user:** 1. ~~Gate holes~~ 2. ~~`check` in CI~~
+3. ~~Editor launch~~ — all merged in PR #48.
 
-1. ~~Gate holes~~ done. 2. ~~`check` in CI~~ done. 3. ~~Editor launch~~ done.
-4. **Next: the board as the source of truth (#40, and `bootstrap.sh`).** `bootstrap.sh`
-   already creates the board with Lane, Owner and Seat fields and the `lane:` labels; it
-   is an orphan no command calls, and its `bootstrap.conf.example` still uses the layer
-   lanes. Wire it in: `lanekeeper board` (or `start`) runs it, and lanekeeper reads Lane
-   and Seat from the board fields rather than parsing them out of issue bodies.
-5. **Frozen: `divide` and the coverage half of `intake`.** Not deleted, not developed.
-   Product-playbook writes the tickets grouped by module; the user sets the Lane field on
-   the board; lanekeeper reads it. Step 3 (#39) is not built. The `lanes.yaml` that
-   `divide --confirm` writes is read by nothing; the confirmation message claims
-   otherwise and should be corrected when the board work lands.
+---
 
-**Blockers:** none. This branch (`claude/parallel-agent-review-ut6ec8`) needs a PR.
+## Session of 2026-09-01 (third): the board, the hand-off, the advisor — v0.7.0
+
+Everything below shipped together as v0.7.0. The board reading is built against `gh`'s
+documented JSON through an injected runner, **not against a live board** — this
+environment has no `gh` and no `project` scope. First thing to do on a real machine:
+`lanekeeper board --dry-run`, then `lanekeeper board`, then `board --show`.
+
+- **`lanekeeper board` (#40)** — `src/lanekeeper/board.py`. `bootstrap.sh` now lives in
+  `src/lanekeeper/scripts/` (package data); the root `bootstrap.sh` is a wrapper. Its
+  inputs are generated into `.lanekeeper/board.conf` from `config.yaml` (lanes) and the
+  capability cards (seats). `bootstrap.conf.example` is gone. `BoardReader.cards()`
+  reads Lane/Owner/Seat by ticket number; `config.board` holds title, owner, `read`,
+  `command`. `spawn --ticket N` takes lane and seat from the card; `--lane` is no longer
+  required by argparse but one of the two must be given.
+- **Hand-off** — `src/lanekeeper/handoff.py`. `start` opens `claude "/vision"`
+  interactively when step 1 says `NEEDS_PLAYBOOK` and stdin/stdout are a tty (or
+  `--handoff`); `--no-handoff` disables. `config.intake.playbook` = command, steps, auto.
+  Not a headless call on purpose: the skills are conversations.
+- **Advisor** — `src/lanekeeper/divide/advisor.py`. `divide.advisor: claude-code` runs
+  `claude -p <prompt> --output-format text`, parses a JSON `{"paths": [...]}`, keeps only
+  paths matching a tracked file, and is asked only about `draft.unplaced`. Result lands in
+  `needs_paths` with `PathSource.PROPOSED` → commented-out in the draft. An
+  `AdvisorError` becomes one note printed by the CLI. **The gate never sees it.**
+- **Decision on `divide`/`intake`: keep both, and make `divide` real.** `divide --confirm`
+  now also writes the lanes into `config.yaml` (`draft.apply_to_config`), creating the
+  file from defaults if absent; `claims: unowned` lanes are exempt from the no-paths check
+  and left out of the policy with a printed line. `collision._segment_may_match` compares
+  two wildcard segments properly; `examples/feature-lanes.yaml` confirms clean against
+  its own tree (`tests/test_divide_applies.py`). The coverage half of `intake` is unchanged
+  and still the weakest part of the tool; with the board as the source of Lane, the next
+  candidate for deletion is `intake.coverage`, not `divide`.
+- Step 3 (#39, dependency vs collision) is still not built.
+
+**Blockers:** none.
 
 **Known local noise:** `test_ports` (×2) and `test_cleanup` fail on the user's Windows
 machine on port-allocation assertions. Confirmed pre-existing on clean `main`; CI's

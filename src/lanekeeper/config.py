@@ -128,6 +128,34 @@ class IntakeThresholds:
 
 
 @dataclass
+class PlaybookConfig:
+    """How `start` hands off to product-playbook when nothing is written down.
+
+    The playbook is a set of Claude Code skills, so the hand-off is Claude Code's own
+    command opened on the first step. `auto` off means `start` only prints the steps,
+    as it did before.
+    """
+
+    command: str = "claude"
+    steps: List[str] = field(default_factory=lambda: ["/vision", "/scope", "/plan"])
+    auto: bool = True
+
+
+@dataclass
+class BoardConfig:
+    """The GitHub project board that carries Lane, Owner and Seat per card.
+
+    `owner` blank means the repository owner. `read` on means step 2 reads each card's
+    Lane from the board and it outranks the ticket form's free-text field.
+    """
+
+    title: str = "Delivery board"
+    owner: str = ""
+    read: bool = False
+    command: str = "gh"
+
+
+@dataclass
 class IntakeConfig:
     """Step 1 of `lanekeeper start`: where the work is written down, and what to
     compare it against. See docs/start-step1-intake.md."""
@@ -142,6 +170,7 @@ class IntakeConfig:
         default_factory=lambda: ["Scope", "Plan", "Features"]
     )
     thresholds: IntakeThresholds = field(default_factory=IntakeThresholds)
+    playbook: PlaybookConfig = field(default_factory=PlaybookConfig)
 
 
 @dataclass
@@ -168,10 +197,13 @@ class DivideConfig:
     no fixed list is right for every repository.
     """
 
-    #: The only implemented value. It exists so that when an advisor is added it arrives
-    #: switched off: the division is a mechanical answer, and an answer that changes
-    #: between runs would not be one.
+    #: `none` (the default) or `claude-code`. Off by default because the division is a
+    #: mechanical answer; the advisor is asked only what a ticket that names no files
+    #: probably touches, and its answer lands in the draft switched off, for the user
+    #: to confirm. It never reaches the gate.
     advisor: str = "none"
+    #: The command the `claude-code` advisor runs headless. On the user's own login.
+    advisor_command: str = "claude"
     #: Relative to lanekeeper's own directory.
     draft_path: str = "start/lanes.draft.yaml"
     #: Relative to the repository root. The confirmed file, checked in and hand-edited.
@@ -239,6 +271,7 @@ class Config:
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     divide: DivideConfig = field(default_factory=DivideConfig)
     editor: EditorConfig = field(default_factory=EditorConfig)
+    board: BoardConfig = field(default_factory=BoardConfig)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -366,6 +399,12 @@ class Config:
                 "command": self.editor.command,
                 "args": list(self.editor.args),
             },
+            "board": {
+                "title": self.board.title,
+                "owner": self.board.owner,
+                "read": self.board.read,
+                "command": self.board.command,
+            },
             "intake": {
                 "tracker": self.intake.tracker,
                 "github": {
@@ -375,6 +414,11 @@ class Config:
                     "command": self.intake.github.command,
                 },
                 "spec_sources": list(self.intake.spec_sources),
+                "playbook": {
+                    "command": self.intake.playbook.command,
+                    "steps": list(self.intake.playbook.steps),
+                    "auto": self.intake.playbook.auto,
+                },
                 "spec_sections": list(self.intake.spec_sections),
                 "thresholds": {
                     "thin_issue_count": self.intake.thresholds.thin_issue_count,
@@ -387,6 +431,7 @@ class Config:
             },
             "divide": {
                 "advisor": self.divide.advisor,
+                "advisor_command": self.divide.advisor_command,
                 "draft_path": self.divide.draft_path,
                 "lane_file": self.divide.lane_file,
                 "path_headings": list(self.divide.path_headings),
@@ -420,6 +465,7 @@ class Config:
         intake_data = data.get("intake", {}) or {}
         divide_data = data.get("divide", {}) or {}
         editor_data = data.get("editor", {}) or {}
+        board_data = data.get("board", {}) or {}
 
         lanes = {}
         if isinstance(lanes_data, list):
@@ -472,6 +518,12 @@ class Config:
             editor=EditorConfig(
                 command=str(editor_data.get("command") or "code"),
                 args=[str(a) for a in (editor_data.get("args") or [])],
+            ),
+            board=BoardConfig(
+                title=str(board_data.get("title") or BoardConfig().title),
+                owner=str(board_data.get("owner") or ""),
+                read=bool(board_data.get("read", False)),
+                command=str(board_data.get("command") or "gh"),
             ),
         )
 
@@ -600,6 +652,14 @@ def _parse_intake(raw: Dict[str, Any]) -> IntakeConfig:
                                       defaults.thresholds.duplicate_report_limit, int,
                                       "a whole number", "thresholds."),
     )
+    pb_raw = raw.get("playbook", {}) or {}
+    pb_defaults = PlaybookConfig()
+    steps = pb_raw.get("steps")
+    playbook = PlaybookConfig(
+        command=str(pb_raw.get("command") or pb_defaults.command),
+        steps=[str(x) for x in steps] if isinstance(steps, list) and steps else list(pb_defaults.steps),
+        auto=bool(pb_raw.get("auto", pb_defaults.auto)),
+    )
     sources = raw.get("spec_sources")
     sections = raw.get("spec_sections")
     return IntakeConfig(
@@ -621,15 +681,15 @@ def _parse_divide(raw: Dict[str, Any]) -> DivideConfig:
     defaults = DivideConfig()
     th_raw = raw.get("thresholds", {}) or {}
 
-    advisor = str(raw.get("advisor") or defaults.advisor)
-    if advisor != "none":
-        # There is no advisor. Accepting the setting and ignoring it would promise a
-        # behaviour that does not exist, which is the defect this project keeps fixing.
+    advisor = str(raw.get("advisor") or defaults.advisor).strip().lower()
+    if advisor not in ("none", "claude-code"):
+        # Accepting an unknown name and ignoring it would promise a behaviour that does
+        # not exist, which is the defect this project keeps fixing.
         raise InvalidDivideSettingError(
             "advisor", raw.get("advisor"),
-            "'none' — dividing the work is a mechanical answer, and no other advisor "
-            "is implemented",
+            "'none' or 'claude-code'",
         )
+    advisor_command = str(raw.get("advisor_command") or defaults.advisor_command)
 
     thresholds = DivideThresholds(
         min_group_tickets=_typed(th_raw, "min_group_tickets",
@@ -664,6 +724,7 @@ def _parse_divide(raw: Dict[str, Any]) -> DivideConfig:
 
     return DivideConfig(
         advisor=advisor,
+        advisor_command=advisor_command,
         draft_path=_inside_the_project(raw, "draft_path", defaults.draft_path),
         lane_file=_inside_the_project(raw, "lane_file", defaults.lane_file),
         path_headings=_words("path_headings", defaults.path_headings),

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [v0.7.0] — 2026-09-01
 
 ### Fixed — the boundary check now holds
 
@@ -52,6 +52,42 @@ lane and `validate` would pass it. All five are closed, each pinned by a test in
   the configured editor (`editor.command`, default `code`). The worktree's `.lane` file
   now carries the task and the lane's `ALLOW` and `DENY` patterns, so an agent told to
   read it knows its boundary without the configuration.
+
+- **`lanekeeper board` — the board, from the configuration.** `bootstrap.sh` has
+  created the GitHub project board with its Lane, Owner and Seat fields since before
+  lanekeeper had a Python line in it, and nothing ever called it. It now ships inside
+  the package, and `board` generates its inputs from `config.yaml`: the lanes are the
+  configured lanes, the seats are the seats with capability cards. The example's layer
+  lanes (interface, service, data, platform) are gone. `board --show` reads every
+  card's Lane, Owner and Seat back; with `board.read: true`, dividing the work takes a
+  card's Lane over the ticket form's free-text field; and `spawn --ticket <number>`
+  takes lane and seat from the card, refusing a card whose Lane is blank.
+
+- **`start` hands off to product-playbook.** When nothing is written down, `start`
+  opens Claude Code in the project with `/vision` as the opening prompt, waits for the
+  session to end, and looks at the tickets again. Only on a terminal with a person at
+  it; `--no-handoff` keeps the old behaviour of printing the steps, `--handoff` forces
+  it. `intake.playbook` in the configuration names the command and the steps.
+
+- **`divide.advisor: claude-code`.** The first advisor, and it is asked one question:
+  what does a ticket that names no files, and that nothing in the code matches,
+  probably touch? It runs `claude -p` on the user's own Claude Code login — a
+  subscription or an API key, lanekeeper holds neither — and its answer is kept only
+  where it names something that exists in the project. The suggestion lands in the
+  draft switched off, marked as proposed, for the user to confirm. It never reaches the
+  gate, which stays a set intersection over globs.
+
+- **`divide --confirm` now changes who may touch what.** `lanes.yaml` was written and
+  read by nothing; the confirmation said "this is what I read from now on" and it was
+  not. Confirming now also writes the lanes into `config.yaml`, the policy `spawn`,
+  `validate` and `check` enforce, creating the file with defaults when a project has
+  none. A `claims: unowned` lane is honoured in the draft check and left out of the
+  policy, with a line saying so.
+
+- **The project's own worked example confirms.** Two wildcard segments were assumed to
+  collide, so `carrier_*.py` and `email_*.py` were reported as one overlap and
+  `examples/feature-lanes.yaml` could not pass `--confirm`. Wildcard segments are now
+  compared character by character; a test confirms the example against its own tree.
 
 
 - **`lanekeeper start`, and the question it asks before anything else.** Everything the

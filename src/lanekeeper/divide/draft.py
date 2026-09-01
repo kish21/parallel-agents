@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import yaml
 
 from .. import paths as lk_paths
+from ..config import Config, LaneConfig, load_config, save_config
 from .models import (
     DivisionProposal,
     DraftProblem,
@@ -263,6 +264,17 @@ def load(root: Path, settings):
     return lanes, data, None
 
 
+def unowned_lanes(document: dict) -> Tuple[str, ...]:
+    """Lanes declared with `claims: unowned`, plus the one `unowned:` names."""
+    doc = document or {}
+    names = [str(name) for name, body in (doc.get("lanes") or {}).items()
+             if isinstance(body, dict) and str(body.get("claims", "")).lower() == "unowned"]
+    top = doc.get("unowned")
+    if isinstance(top, str) and top not in ("error", "escalate", "") and top not in names:
+        names.append(top)
+    return tuple(names)
+
+
 def shared_paths(document: dict) -> Tuple[str, ...]:
     """Every path covered by a shared zone the user declared."""
     zones = (document or {}).get("shared") or {}
@@ -295,10 +307,14 @@ def validate(lanes: Sequence[ProposedLane], files: Sequence[str], settings,
             detail=("That file does not describe any groups of work, so there is "
                     "nothing for me to write down.")))
 
+    unowned = unowned_lanes(document)
     for lane in lanes:
-        if not lane.paths:
+        if not lane.paths and lane.name not in unowned:
             # No files means no boundary, and no boundary means nothing to hold the
-            # agent to. Writing this would ship a promise that does not exist.
+            # agent to. Writing this would ship a promise that does not exist. The one
+            # exception is the lane the schema lets claim everything nobody else does
+            # (`claims: unowned`, README §The lane file): its boundary is defined by
+            # absence, and it is the documented home of greenfield work.
             problems.append(DraftProblem(
                 kind="no-paths", subject=lane.name,
                 detail=(f"'{lane.name}' does not say which files it covers, so I would "
@@ -318,6 +334,40 @@ def validate(lanes: Sequence[ProposedLane], files: Sequence[str], settings,
     overlaps = collision.report(lanes, files, settings, shared_paths=zones)
     return ValidationReport(lanes=tuple(lanes), problems=tuple(problems),
                             overlaps=tuple(overlaps), shared_paths=zones)
+
+
+def apply_to_config(document: dict, root: Path,
+                    project_name: str = "") -> Tuple[Path, Tuple[str, ...]]:
+    """Puts the confirmed lanes where every other command reads them: `config.yaml`.
+
+    `lanes.yaml` is the human record of who owns what, with `owner`, `shared` and the
+    rest of the documented schema. But `spawn`, `validate` and `check` read the `lanes`
+    section of the policy file, and until this existed nothing carried a confirmed
+    division across — the confirmation said "this is what I read from now on" and it
+    was not. A project with no policy file yet gets one, built from the defaults and
+    these lanes, so `start` ends with a project an agent can be spawned into.
+
+    A `claims: unowned` lane has no patterns to enforce — its boundary is every path
+    nobody else claims, which the gate cannot express yet — so it is left out of the
+    policy and its name is returned, for the confirmation to say so.
+    """
+    try:
+        config = load_config(root)
+    except FileNotFoundError:
+        config = Config.default(project_name=project_name or Path(root).name)
+    skipped = unowned_lanes(document)
+    lanes = {}
+    for name, body in ((document or {}).get("lanes") or {}).items():
+        body = body or {}
+        if str(name) in skipped:
+            continue
+        lanes[str(name)] = LaneConfig(
+            name=str(name),
+            allow=list(_paths_of(body.get("allow") or [])),
+            deny=list(_paths_of(body.get("deny") or [])),
+        )
+    config.lanes = lanes
+    return save_config(config, root), skipped
 
 
 def write_lane_file(document: dict, root: Path, settings,

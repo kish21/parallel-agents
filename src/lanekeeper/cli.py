@@ -28,7 +28,10 @@ from .capabilities import (
 )
 from .config import Config, UnknownLaneError, load_config, save_config
 from . import check as check_mod
+from . import board as board_mod
+from . import handoff
 from .desk import EditorNotFoundError, open_worktree
+from .divide.advisor import AdvisorError, get_advisor
 from .doctor import Doctor
 from . import paths
 from .frameworks import default_url_templates
@@ -133,7 +136,25 @@ def _run_step2(args: argparse.Namespace, intake_result) -> int:
     """
     root = Path.cwd()
     config = _config_for_start(root)
-    proposal = propose(root, config.divide, intake_result)
+    notes: List[str] = []
+
+    # The board, when configured, says which lane each card is in. It is read here,
+    # not in step 1, because step 1 asks whether work exists and this asks who owns it.
+    board_lanes = None
+    if config.board.read:
+        try:
+            cards = board_mod.BoardReader(config.board, root, gh=config.board.command).cards()
+            board_lanes = {ref: card.lane for ref, card in cards.items() if card.lane}
+        except board_mod.BoardError as exc:
+            notes.append(f"I could not read the board, so lanes come from the tickets: {exc}")
+
+    try:
+        advisor = get_advisor(config.divide, root)
+    except AdvisorError as exc:
+        print(f"❌ {exc}", file=sys.stderr)
+        return 1
+    proposal = propose(root, config.divide, intake_result, advisor=advisor,
+                       board_lanes=board_lanes, notes=notes)
     # Deliberately not `--fresh`, which means "ignore what step 1 decided". Re-using it
     # here would make a flag about a recorded judgement quietly delete the file the user
     # had spent time editing.
@@ -141,6 +162,8 @@ def _run_step2(args: argparse.Namespace, intake_result) -> int:
                                       overwrite=getattr(args, "redraft", False))
     print()
     print(render_division(proposal, _relative(path, root), draft_written=written))
+    for note in notes:
+        print(f"⚠️  {note}")
     return 0
 
 
@@ -192,8 +215,14 @@ def _confirm_division(root: Path, config, args: argparse.Namespace) -> int:
         print("   Have a look at it, and if you want mine instead, run the same")
         print("   command with --force.")
         return 1
+    policy, skipped = divide_draft.apply_to_config(document, root,
+                                                   project_name=config.project_name)
     print()
-    print(render_confirmation(report, written=_relative(path, root)))
+    print(render_confirmation(report, written=_relative(path, root),
+                              policy=_relative(policy, root)))
+    if skipped:
+        print(f"   '{', '.join(skipped)}' claims whatever nobody else does, which the "
+              f"gate cannot enforce yet, so it is not in the policy file.")
     return 0
 
 
@@ -212,12 +241,88 @@ def cmd_start(args: argparse.Namespace) -> int:
     did not.
     """
     result, code = _step1_result(args)
+    if result is not None and not result.passed and _wants_playbook(result):
+        code = _hand_off_to_playbook(args)
+        if code != 0:
+            return code
+        # Whatever now exists is judged afresh; the record was about the old backlog.
+        args.fresh = True
+        result, code = _step1_result(args)
     if result is None or not result.passed:
         return code
     code = _run_step2(args, result)
     if code == 0:
         print("   After that, 'start' would set each agent up with its own copy of the")
         print("   project to work in — that part is not built yet (issues #33, #40, #41).")
+    return code
+
+
+def _wants_playbook(result) -> bool:
+    """Step 1 stopped because the work is not written down, not because it is unclear."""
+    from .intake.models import Verdict
+    return result.verdict is Verdict.NEEDS_PLAYBOOK and result.tracker_available
+
+
+def _hand_off_to_playbook(args: argparse.Namespace) -> int:
+    """Opens Claude Code on product-playbook's first step, then returns.
+
+    Only on a terminal with a person at it, and only unless told not to. Returns 0 when
+    the session ended normally so `start` can look again; anything else stops here.
+    """
+    root = Path.cwd()
+    config = _config_for_start(root)
+    settings = config.intake.playbook
+    forced = getattr(args, "handoff", False)
+    if getattr(args, "no_handoff", False):
+        return 1
+    if not forced and not handoff.can_hand_off(settings):
+        return 1
+    try:
+        print()
+        print(handoff.describe(settings))
+        print()
+        code = handoff.run_playbook(settings, root)
+    except handoff.HandoffError as exc:
+        print(f"⚠️  {exc}", file=sys.stderr)
+        return 1
+    if code != 0:
+        print(f"⚠️  Claude Code exited with {code}; I have not looked at the tickets again.",
+              file=sys.stderr)
+        return 1
+    print()
+    print("🧭 Back from Claude Code. Looking at the tickets again.")
+    return 0
+
+
+def cmd_board(args: argparse.Namespace) -> int:
+    """Creates the board from the configuration, or shows what it says."""
+    root = Path.cwd()
+    try:
+        config = load_config(root)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+
+    if args.show:
+        try:
+            cards = board_mod.BoardReader(config.board, root, gh=config.board.command).cards()
+        except board_mod.BoardError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        print()
+        print(board_mod.render_cards(cards))
+        return 0
+
+    try:
+        code = board_mod.create(config, root, dry_run=args.dry_run, check=args.check,
+                                repo=args.repo or "")
+    except board_mod.BoardError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    if code == 0 and not args.dry_run and not args.check:
+        print()
+        print("   To read Lane and Seat from the board when dividing the work, set")
+        print(f"   'board.read: true' in {paths.display_config_path()}.")
     return code
 
 
@@ -429,6 +534,34 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"❌ Error loading project: {e}", file=sys.stderr)
         return 1
 
+    # A ticket number is enough when the board says which lane and seat it has. The
+    # board is read, never guessed from: a card with no Lane is refused, with the fix.
+    if getattr(args, "ticket", None):
+        try:
+            card = board_mod.BoardReader(config.board, root, gh=config.board.command) \
+                .cards().get(str(args.ticket))
+        except board_mod.BoardError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+        if card is None:
+            print(f"❌ Ticket #{args.ticket} is not on the board '{config.board.title}'.",
+                  file=sys.stderr)
+            return 1
+        if not args.lane:
+            if not card.lane:
+                print(f"❌ Ticket #{args.ticket} has no Lane on the board. Set it there, "
+                      f"or pass --lane.", file=sys.stderr)
+                return 1
+            args.lane = card.lane
+        if not args.seat and card.seat:
+            args.seat = card.seat
+        if args.task == p_spawn_default_task():
+            args.task = f"#{args.ticket}"
+    if not args.lane:
+        print("❌ Say which lane this agent works in: --lane <name>, or --ticket <number> "
+              "with the lane set on the board.", file=sys.stderr)
+        return 1
+
     # Reject an undeclared lane before any resource is provisioned. A lane that is not
     # in the config has no allow/deny policy, so an agent spawned into it could never be
     # meaningfully validated.
@@ -541,6 +674,10 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         return _open_desk(config, resolved_path, agent_id)
     print(f"To open:     lanekeeper open {agent_id}")
     return 0
+
+
+def p_spawn_default_task() -> str:
+    return "General feature development"
 
 
 def _open_desk(config: Config, worktree: Path, agent_id: str) -> int:
@@ -996,7 +1133,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_start.add_argument(
         "--redraft", action="store_true",
         help="Throw away your edits to the proposed split and suggest it again")
+    p_start.add_argument(
+        "--no-handoff", action="store_true",
+        help="When nothing is written down, only say so; do not open Claude Code")
+    p_start.add_argument(
+        "--handoff", action="store_true",
+        help="Open Claude Code on product-playbook even when not on a terminal")
     p_start.set_defaults(func=cmd_start)
+
+    # board
+    p_board = subparsers.add_parser(
+        "board", help="Create the GitHub project board from the configuration, or show it")
+    p_board.add_argument("--show", action="store_true",
+                         help="Show each card's Lane, Owner and Seat instead of creating")
+    p_board.add_argument("--dry-run", action="store_true", help="Print every action, change nothing")
+    p_board.add_argument("--check", action="store_true", help="Report the current state and exit")
+    p_board.add_argument("--repo", help="OWNER/NAME to configure (default: this repository)")
+    p_board.set_defaults(func=cmd_board)
 
     p_intake = subparsers.add_parser(
         "intake",
@@ -1043,8 +1196,9 @@ def build_parser() -> argparse.ArgumentParser:
     # spawn
     p_spawn = subparsers.add_parser("spawn", help="Spawn a new isolated agent worktree and allocate ports")
     p_spawn.add_argument("--name", help="Human-readable agent name (e.g. backend-1)")
-    p_spawn.add_argument("--lane", required=True, help="Assigned lane (e.g. backend, frontend, data)")
-    p_spawn.add_argument("--task", default="General feature development", help="Task description")
+    p_spawn.add_argument("--lane", help="Assigned lane, as declared in the configuration")
+    p_spawn.add_argument("--ticket", help="Ticket number; its Lane and Seat are read from the board")
+    p_spawn.add_argument("--task", default=p_spawn_default_task(), help="Task description")
     p_spawn.add_argument("--seat", help="Seat slot (e.g. SR1, SR2, JR1, JR2)")
     p_spawn.add_argument("--command", help="Optional CLI command/harness to start in worktree")
     p_spawn.add_argument("--force", action="store_true", help="Bypass max agent capacity check")
