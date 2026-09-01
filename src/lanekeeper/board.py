@@ -21,6 +21,7 @@ module is testable without a network, an account, or a board.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -121,16 +122,41 @@ def write_conf(config: Config, root: Path, repo: str = "") -> Path:
     return target
 
 
+def find_bash() -> Optional[str]:
+    """A bash that can run the script.
+
+    On Windows the first `bash` on PATH is usually `System32\\bash.exe`, the Windows
+    Subsystem for Linux launcher, which exits 1 without a distribution installed and
+    cannot see Windows paths when one is. Git for Windows ships the bash that can, so
+    its usual homes are tried first there.
+    """
+    if sys.platform == "win32":
+        roots = [os.environ.get("ProgramFiles", r"C:\Program Files"),
+                 os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                 os.path.join(os.environ.get("LocalAppData", ""), "Programs")]
+        for root in roots:
+            for rel in (r"Git\bin\bash.exe", r"Git\usr\bin\bash.exe"):
+                candidate = os.path.join(root, rel)
+                if root and os.path.isfile(candidate):
+                    return candidate
+    return shutil.which("bash")
+
+
+def bash_path(path: Path) -> str:
+    """A path as bash reads it: forward slashes, which Git Bash accepts for `C:/...`."""
+    return str(path).replace("\\", "/")
+
+
 def script_argv(conf: Path, dry_run: bool = False, check: bool = False,
                 repo: str = "") -> List[str]:
-    bash = shutil.which("bash")
+    bash = find_bash()
     if bash is None:
         raise BoardError(
             "Creating the board runs a bash script, and 'bash' is not on PATH. On "
-            "Windows, run this from Git Bash.")
+            "Windows, install Git for Windows, which provides one.")
     if not SCRIPT.is_file():
         raise BoardError(f"The board script is missing from this installation: {SCRIPT}")
-    argv = [bash, str(SCRIPT), "--config", str(conf)]
+    argv = [bash, bash_path(SCRIPT), "--config", bash_path(conf)]
     if repo:
         argv += ["--repo", repo]
     if check:

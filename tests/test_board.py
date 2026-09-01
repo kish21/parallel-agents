@@ -122,11 +122,16 @@ class TestCreatingTheBoard(unittest.TestCase):
         for layer in ("interface", "service", "platform"):
             self.assertNotIn(f"\n  {layer}\n", text)
 
-    @unittest.skipIf(shutil.which("bash") is None, "bash is needed to parse the inputs")
     def test_the_script_can_source_the_generated_inputs(self):
+        bash = board_mod.find_bash()
+        if bash is None or subprocess.run([bash, "-c", "echo ok"], capture_output=True,
+                                          text=True).stdout.strip() != "ok":
+            self.skipTest("no working bash on this machine")
         conf = board_mod.write_conf(self.cfg, self.tmp)
-        res = subprocess.run(["bash", "-c", f". '{conf}' && printf '%s' \"$PROJECT_TITLE\" && printf '|%s' \"$LANES\""],
-                             capture_output=True, text=True)
+        res = subprocess.run(
+            [bash, "-c", f". '{board_mod.bash_path(conf)}' && printf '%s' \"$PROJECT_TITLE\" "
+                         f"&& printf '|%s' \"$LANES\""],
+            capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertTrue(res.stdout.startswith("My board|"))
         self.assertIn("checkout", res.stdout)
@@ -136,7 +141,7 @@ class TestCreatingTheBoard(unittest.TestCase):
         wrapper = Path(__file__).resolve().parents[1] / "bootstrap.sh"
         self.assertIn("src/lanekeeper/scripts/bootstrap.sh", wrapper.read_text(encoding="utf-8"))
 
-    @unittest.skipIf(shutil.which("bash") is None, "bash is needed to run the script")
+    @unittest.skipIf(board_mod.find_bash() is None, "bash is needed to run the script")
     def test_create_runs_the_script_with_the_inputs(self):
         seen = {}
 
@@ -146,7 +151,7 @@ class TestCreatingTheBoard(unittest.TestCase):
 
         code = board_mod.create(self.cfg, self.tmp, dry_run=True, launcher=launcher)
         self.assertEqual(code, 0)
-        self.assertEqual(Path(seen["argv"][1]), board_mod.SCRIPT)
+        self.assertEqual(Path(seen["argv"][1]).resolve(), board_mod.SCRIPT)
         self.assertIn("--dry-run", seen["argv"])
         self.assertIn("--config", seen["argv"])
 
