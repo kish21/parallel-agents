@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.2] — 2026-09-02
+
+### Fixed
+
+- **Every `lanekeeper-*.yml` workflow is policy.** The `policy` lane listed only the
+  gate's own workflow file, so adding a second lanekeeper workflow (the manual board
+  runner) to the pull request that installs lanekeeper turned that PR's gate red.
+  Found on the first real project, the day after v0.7.1.
+
 ## [v0.7.1] — 2026-09-01
 
 Everything here comes from the first end-to-end run on a real project —
