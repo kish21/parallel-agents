@@ -269,6 +269,36 @@ windows-latest is green. Not a regression — do not chase it.
 
 ---
 
+## Session of 2026-09-02: the one-command path — v0.7.3 (unreleased)
+
+The user's question after the v0.7.2 trial: *why are we doing this, and will anyone
+use it?* The honest answer given: the complaint is real (worktrees isolate the copy,
+not the intent, so people using worktree tools still collide at merge), the gate is
+the one thing nothing else does, and the adoption blocker is the setup cost — `start`,
+`divide`, a draft, a board — before a person with an existing backlog gets anything.
+
+**Built:** `lanekeeper spawn --ticket N` with no board. `src/lanekeeper/ticket.py`:
+the ticket's own file list is the lane, named by its tag (`names.tag`) or `issue-N`,
+written into `config.yaml` (`ensure_lane`, which also lets scoped seat cards into the
+lane). No files → refused with the fix: `--allow <glob>` (repeatable, commas ok) or
+`--propose` (runs `ClaudeCodeAdvisor` whatever `divide.advisor` says; the answer is
+printed and used only on a tty `y` or `--yes`). An existing lane of that name is
+reused, never rewritten. Collisions with other lanes (`collision.patterns_intersect`)
+are reported, not blocked on. No `config.yaml` at all → one is written holding only
+this lane plus `_first_time_setup`. The board is consulted only with `board.read:
+true`; a ticket the board lacks falls back to the ticket. `IssueTracker.get_issue`
+added (default scans the list; GitHub uses `gh issue view`). Tests:
+`tests/test_spawn_ticket.py`; `test_board.py`'s spawn tests now set `board.read`.
+
+**The tester one-pager** lives outside the repo as a Claude artifact (published this
+session) and mirrors the README section *Already have a backlog? One command per
+ticket*. It assumes 0.7.3 is on PyPI — the owner tags releases from the phone.
+
+**Not done:** publishing 0.7.3; the live board check (still waits on tracker PR #7
+and a `LANEKEEPER_GH_TOKEN` secret); any outside tester.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use

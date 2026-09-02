@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 class TrackerError(RuntimeError):
@@ -76,3 +76,15 @@ class IssueTracker(ABC):
 
         Raises `TrackerError` if reading fails after `is_available` said it would work.
         """
+
+    def get_issue(self, ref: str) -> Optional[TrackedIssue]:
+        """One piece of work by its own identifier, or None if the tracker has none.
+
+        The default reads the whole list and picks; a tracker that can ask for one
+        directly should. Raises `TrackerError` as `list_issues` does.
+        """
+        wanted = str(ref).strip().lstrip("#")
+        for issue in self.list_issues():
+            if str(issue.ref) == wanted:
+                return issue
+        return None

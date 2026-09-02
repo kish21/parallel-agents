@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.2-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.3-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -135,6 +135,36 @@ $ lanekeeper check --lane feat-02 --base origin/main
 Revert the stray file and the same command prints `✅ CHECK PASSED`. A rename out of
 another lane, a deleted file that was not yours, an edit to the policy itself: all
 caught. A PR that changes the policy files carries the reserved label `lane: policy`.
+
+### Already have a backlog? One command per ticket
+
+You do not need `start`, `divide` or a board. Hand a ticket to an agent and the ticket
+is the boundary:
+
+```
+$ lanekeeper spawn --ticket 12 --open
+
+🎫 Ticket #12: [FEAT-02] Cluster similar issues
+   Lane 'feat-02', bounded by the ticket's own file list:
+     src/components/features/ClusterCard.tsx
+     src/domain/clustering/**
+   Written into the policy so the pull-request gate checks the same boundary.
+
+🚀 Agent 'worker-1' (agent-001) successfully spawned!
+  • Worktree: .lanekeeper/worktrees/agent-001
+  • Branch:   parallel/agent-001/12-feat-02-cluster-similar-issues
+  • Lane:     feat-02
+
+  • When the agent opens its pull request, label it 'lane: feat-02'. The gate fails
+    the change if any file is outside the lane.
+```
+
+The file list is the ticket's *Allowed File Paths* or *Target Modules* section. A
+ticket that names no files is refused, never guessed at: say the files yourself with
+`--allow 'src/checkout/**'`, or run `--propose` to have Claude Code suggest them from
+the ticket and the tree, shown to you before they are used. If another lane could
+touch the same files, it says so and lets you decide. On a project with no policy
+yet, this first command writes one containing only this lane.
 
 ### What it does not do
 
@@ -607,7 +637,7 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
 | **`lanekeeper init`** | The escape hatch: writes a policy with lanes detected from the directory layout (technology layers, not features). Use `start` unless you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
-| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket` reads lane and seat from the board; `--open` opens the editor. |
+| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a confirmed `--propose`); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
 | **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. `--write-workflow` installs it in GitHub Actions. |
