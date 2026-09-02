@@ -3,7 +3,7 @@
 Project instructions and build state. Read this first; it exists so each session stops
 re-deriving the same decisions from the issue tracker.
 
-Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.1.
+Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.2.
 
 ---
 

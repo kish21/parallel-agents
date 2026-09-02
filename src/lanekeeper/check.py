@@ -41,13 +41,15 @@ WORKFLOW_PATH = Path(".github") / "workflows" / "lanekeeper-gate.yml"
 def policy_lane_paths() -> Tuple[str, ...]:
     """Everything a change under the `policy` lane may touch.
 
-    The policy files themselves, plus the three files that only ever change alongside
-    them: the ignore rules `init` writes, the human record `divide --confirm` writes,
-    and this gate's own workflow. Without those, the pull request that introduces
-    lanekeeper to a project could not pass the gate it installs.
+    The policy files themselves, plus the files that only ever change alongside them:
+    the ignore rules `init` writes, the human record `divide --confirm` writes, and
+    every workflow lanekeeper itself writes — the gate, and any other
+    `lanekeeper-*.yml` in the workflows directory. On the first real project, a second
+    lanekeeper workflow added to the install pull request turned its own gate red,
+    because only the gate's file was listed.
     """
     return tuple(paths.policy_paths()) + (
-        ".gitignore", "lanes.yaml", WORKFLOW_PATH.as_posix())
+        ".gitignore", "lanes.yaml", ".github/workflows/lanekeeper-*.yml")
 
 
 class NoLaneError(ValueError):
@@ -125,7 +127,7 @@ def _check_policy_change(files: List[str]) -> LaneValidationResult:
         if LaneEngine.is_bookkeeping(norm):
             continue
         if LaneEngine.is_policy(norm) or any(
-                norm == p or (p.endswith("/") and norm.startswith(p)) for p in permitted):
+                LaneEngine.match_glob(norm, p) for p in permitted):
             allowed.append(norm)
         else:
             violations.append(LaneViolation(filepath=norm, reason="not_allowed"))

@@ -169,8 +169,15 @@ class TestAPolicyChangeIsItsOwnLane(CheckoutTestCase):
         self._commit(".gitignore", "/.lanekeeper/*\n!/.lanekeeper/config.yaml\n")
         self._commit("lanes.yaml", "version: 1\n")
         self._commit(".github/workflows/lanekeeper-gate.yml", "name: Lane gate\n")
+        self._commit(".github/workflows/lanekeeper-board.yml", "name: Lanekeeper board\n")
         res = self._check("--lane", "policy")
         self.assertEqual(res.returncode, 0, output_of(res))
+
+    def test_a_workflow_that_is_not_lanekeepers_is_not_policy(self):
+        self._commit(".github/workflows/ci.yml", "name: CI\n")
+        res = self._check("--lane", "policy")
+        self.assertEqual(res.returncode, 2, output_of(res))
+        self.assertIn("ci.yml", res.stdout)
 
     def test_check_runs_from_a_subdirectory(self):
         self._commit("src/checkout/cart.py")
