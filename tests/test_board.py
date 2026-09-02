@@ -27,6 +27,7 @@ from lanekeeper.trackers.github_issues import CommandResult
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _divide_fixtures import feature_files, ticket  # noqa: E402
+from _intake_fakes import FakeTracker  # noqa: E402
 
 
 PROJECTS = json.dumps({"projects": [{"title": "Other", "number": 3},
@@ -209,6 +210,9 @@ class TestSpawnFromATicket(unittest.TestCase):
         subprocess.run(["git", "commit", "-qm", "init"], cwd=self.root, check=True)
         cfg = Config.default("p")
         cfg.capability_gates = {}
+        # The board is the source of Lane only when the project says so; otherwise a
+        # ticket number means the ticket itself (tests/test_spawn_ticket.py).
+        cfg.board = BoardConfig(read=True)
         save_config(cfg, self.root)
         self.original = cli.board_mod.BoardReader
         cli.board_mod.BoardReader = FakeReader
@@ -241,10 +245,17 @@ class TestSpawnFromATicket(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no Lane", err)
 
-    def test_a_ticket_not_on_the_board_is_refused(self):
-        code, out, err = self._spawn(ticket="99")
+    def test_a_ticket_not_on_the_board_falls_back_to_the_ticket_itself(self):
+        # No tracker is reachable here, so the fallback is refused with that reason —
+        # but by the tracker, not by the board.
+        original = cli.get_tracker
+        cli.get_tracker = lambda settings, root: FakeTracker()
+        try:
+            code, out, err = self._spawn(ticket="99")
+        finally:
+            cli.get_tracker = original
         self.assertEqual(code, 1)
-        self.assertIn("not on the board", err)
+        self.assertIn("could not find ticket #99", err)
 
     def test_neither_lane_nor_ticket_is_refused(self):
         code, out, err = self._spawn()

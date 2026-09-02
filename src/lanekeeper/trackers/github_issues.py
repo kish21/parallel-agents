@@ -120,6 +120,35 @@ class GitHubIssuesTracker(IssueTracker):
 
         return _parse_issues(res.stdout)
 
+    def get_issue(self, ref: str) -> Optional[TrackedIssue]:
+        """`gh issue view`: one ticket by number, open or closed.
+
+        Closed is not filtered here — a person handing out a closed ticket has a reason,
+        and the state is on the result for the caller to mention.
+        """
+        number = str(ref).strip().lstrip("#")
+        argv = [self._settings.command, "issue", "view", number, "--json", ISSUE_FIELDS]
+        if self._settings.repo:
+            argv += ["--repo", self._settings.repo]
+        try:
+            res = self._run(argv)
+        except OSError as exc:
+            raise TrackerError(f"Could not run '{' '.join(argv)}': {exc}") from exc
+        if res.returncode != 0:
+            detail = res.stderr.strip()
+            if _means_not_connected(detail):
+                raise TrackerNotConnectedError(
+                    "This project is not connected to GitHub yet, so there is no "
+                    "ticket there for me to read.")
+            if any(m in detail.lower() for m in _NO_SUCH_ISSUE):
+                return None
+            raise TrackerError(
+                f"Reading ticket #{number} from GitHub failed: "
+                + (detail or f"'{' '.join(argv)}' exited {res.returncode}"))
+        issues = _parse_issues(f"[{res.stdout}]" if res.stdout.strip().startswith("{")
+                               else res.stdout)
+        return issues[0] if issues else None
+
     # -- internals ---------------------------------------------------------------
 
     def _list_argv(self) -> List[str]:
@@ -145,6 +174,11 @@ _NOT_CONNECTED = (
     "could not resolve to a repository",
     "not a git repository",
 )
+
+
+#: What `gh issue view` says about a number that is not an issue. A wrong number is an
+#: ordinary typo, answered with "not found", not a failure to read GitHub.
+_NO_SUCH_ISSUE = ("could not resolve to an issue", "could not find", "not found")
 
 
 def _means_not_connected(stderr: str) -> bool:

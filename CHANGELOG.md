@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.3] — 2026-09-02
+
+### Added
+
+- **One command per ticket.** `lanekeeper spawn --ticket 12` no longer needs a board:
+  the ticket's own file list (*Allowed File Paths* or product-playbook's *Target
+  Modules*) becomes a lane named by the ticket's tag (`[FEAT-02]` → `feat-02`, else
+  `issue-12`), written into the policy so `check` in CI enforces the same boundary.
+  A ticket that names no files is refused with the fix: `--allow <glob>` to say the
+  files yourself, or `--propose` to have Claude Code suggest them, shown before use
+  and accepted only by a terminal answer or `--yes`. A lane already in the policy is
+  reused as it is. A possible collision with another lane is reported, not blocked
+  on. On a project with no policy, the command writes one holding only this lane.
+  The board is consulted only with `board.read: true`; a ticket the board lacks
+  falls back to the ticket itself. Trackers gain `get_issue`; GitHub reads it with
+  `gh issue view`.
+
 ## [v0.7.2] — 2026-09-02
 
 ### Fixed

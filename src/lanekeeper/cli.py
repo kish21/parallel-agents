@@ -41,6 +41,9 @@ from .divide import propose
 from .divide import draft as divide_draft
 from .divide.presenter import render as render_division, render_confirmation
 from .trackers import UnknownTrackerError, get_tracker
+from .trackers.base import TrackerError
+from . import ticket as ticket_mod
+from .divide import boundary as divide_boundary
 from .layout import detect_layout, measure_coverage, tracked_files
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
@@ -546,7 +549,16 @@ def target_path_for(root: Path, config: Config, agent_id: str) -> Path:
 def cmd_spawn(args: argparse.Namespace) -> int:
     root = Path.cwd()
     try:
-        config = load_config(root)
+        try:
+            config = load_config(root)
+        except FileNotFoundError:
+            # A ticket is enough to start a project: the policy is written from it
+            # below, with no lanes but the ticket's. The stock layer lanes would only
+            # collide with it.
+            if not getattr(args, "ticket", None):
+                raise
+            config = Config.default(project_name=root.name)
+            config.lanes = {}
         state_mgr = StateManager(root)
         worktree_mgr = WorktreeManager(root)
         port_mgr = PortManager(config, state_mgr)
@@ -556,32 +568,40 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"❌ Error loading project: {e}", file=sys.stderr)
         return 1
 
-    # A ticket number is enough when the board says which lane and seat it has. The
-    # board is read, never guessed from: a card with no Lane is refused, with the fix.
+    # A ticket number is enough on its own. With `board.read` on, the board's card says
+    # which lane and seat the ticket has; otherwise — and for a ticket the board does not
+    # carry — the ticket itself is the boundary (see `ticket.py`). Either way nothing is
+    # guessed: a card with no Lane, or a ticket with no file list, is refused with the fix.
+    ticket_lane = None
     if getattr(args, "ticket", None):
-        try:
-            card = board_mod.BoardReader(config.board, root, gh=config.board.command) \
-                .cards().get(str(args.ticket))
-        except board_mod.BoardError as e:
-            print(f"❌ {e}", file=sys.stderr)
-            return 1
-        if card is None:
-            print(f"❌ Ticket #{args.ticket} is not on the board '{config.board.title}'.",
-                  file=sys.stderr)
-            return 1
-        if not args.lane:
-            if not card.lane:
-                print(f"❌ Ticket #{args.ticket} has no Lane on the board. Set it there, "
-                      f"or pass --lane.", file=sys.stderr)
+        card = None
+        if config.board.read:
+            try:
+                card = board_mod.BoardReader(config.board, root, gh=config.board.command) \
+                    .cards().get(str(args.ticket).lstrip("#"))
+            except board_mod.BoardError as e:
+                print(f"❌ {e}", file=sys.stderr)
                 return 1
-            args.lane = card.lane
-        if not args.seat and card.seat:
-            args.seat = card.seat
-        if args.task == p_spawn_default_task():
-            args.task = f"#{args.ticket}"
+        if card is not None and (card.lane or args.lane):
+            args.lane = args.lane or card.lane
+            if not args.seat and card.seat:
+                args.seat = card.seat
+            if args.task == p_spawn_default_task():
+                args.task = f"#{args.ticket}"
+        elif card is not None:
+            print(f"❌ Ticket #{args.ticket} has no Lane on the board. Set it there, "
+                  f"or pass --lane.", file=sys.stderr)
+            return 1
+        else:
+            ticket_lane = _lane_from_ticket(config, root, args)
+            if ticket_lane is None:
+                return 1
+            args.lane = ticket_lane.name
+            if args.task == p_spawn_default_task():
+                args.task = ticket_lane.task
     if not args.lane:
-        print("❌ Say which lane this agent works in: --lane <name>, or --ticket <number> "
-              "with the lane set on the board.", file=sys.stderr)
+        print("❌ Say which agent this is for: --ticket <number>, or --lane <name>.",
+              file=sys.stderr)
         return 1
 
     # Reject an undeclared lane before any resource is provisioned. A lane that is not
@@ -690,12 +710,103 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"  • Seat:     {seat}")
     print(f"\nTo inspect:  lanekeeper inspect {agent_id}")
     print(f"To validate: lanekeeper validate {agent_id}")
+    if ticket_lane is not None:
+        print()
+        print(ticket_mod.next_steps(ticket_lane, (root / check_mod.WORKFLOW_PATH).exists()))
     if getattr(args, "open", False):
         # The agent exists whether or not the editor opens; a missing editor is reported
         # and the spawn still succeeded.
         return _open_desk(config, resolved_path, agent_id)
     print(f"To open:     lanekeeper open {agent_id}")
     return 0
+
+
+def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
+    """The lane for `spawn --ticket` when the board does not say: the ticket itself.
+
+    Reads the ticket, resolves its boundary (`--allow`, the ticket's file list, or a
+    proposal the person accepts), writes the lane into the policy and says what it did.
+    Returns None after printing the reason when there is nothing safe to spawn into.
+    """
+    try:
+        tracker = get_tracker(config.intake, root)
+    except UnknownTrackerError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return None
+    ref = str(args.ticket).strip().lstrip("#")
+    try:
+        issue = tracker.get_issue(ref)
+    except TrackerError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return None
+    if issue is None:
+        available = tracker.is_available()
+        why = "" if available.available else f" {available.reason}"
+        print(f"❌ I could not find ticket #{ref}.{why}", file=sys.stderr)
+        return None
+
+    proposed = ()
+    if getattr(args, "propose", False) and not getattr(args, "allow", None) \
+            and not config.has_lane(ticket_mod.lane_name(issue, args.lane or "")) \
+            and not divide_boundary.read(issue, config.divide).paths:
+        proposed = _propose_boundary(config, root, issue, args)
+        if proposed is None:
+            return None
+
+    try:
+        lane = ticket_mod.resolve(config, issue, explicit_lane=args.lane or "",
+                                  allow=getattr(args, "allow", None) or (), proposed=proposed)
+    except ticket_mod.NoBoundaryError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return None
+
+    # A brand-new project gets the rest of a first-time setup, as `divide --confirm` does.
+    if not paths.config_path(root).exists():
+        save_config(config, root)
+        _first_time_setup(root, config)
+        print(f"📁 Wrote {paths.display_config_path()} and the seat cards: this is the "
+              f"first agent on this project.")
+    created, widened = ticket_mod.ensure_lane(config, root, lane)
+    print(ticket_mod.describe(lane, created, widened))
+    print()
+    return lane
+
+
+def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespace):
+    """Asks Claude Code which files a ticket touches, and asks the person before using it.
+
+    The advisor is run here whatever `divide.advisor` says, because the flag is the
+    person asking; the answer still counts for nothing until they accept it. Without a
+    terminal, `--yes` is the acceptance; otherwise the proposal is printed with the
+    `--allow` line that would use it, and nothing is spawned.
+    """
+    from .divide.advisor import ClaudeCodeAdvisor
+    advisor = ClaudeCodeAdvisor(config.divide.advisor_command, root)
+    try:
+        advisor.check_available()
+        found = advisor.propose_paths(issue.ref, issue.title, issue.body, tracked_files(root))
+    except AdvisorError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return None
+    if not found:
+        print(f"❌ Claude Code could not name any files in this project for ticket "
+              f"#{issue.ref}. Say them yourself with --allow.", file=sys.stderr)
+        return None
+    print(f"🤖 Claude Code proposes this boundary for #{issue.ref} ({issue.title}):")
+    for p in found:
+        print(f"     {p}")
+    allow_line = " ".join(f"--allow '{p}'" for p in found)
+    if getattr(args, "yes", False):
+        return tuple(found)
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        answer = input("   Use it? The agent will be held to exactly these files. [y/N]: ")
+        if ticket_mod.confirm_proposal(issue.ref, found, answer):
+            return tuple(found)
+        print("   Not used. Edit the list and pass it with --allow, or run again.")
+        return None
+    print(f"   Not used: nobody confirmed it. Accept it with --yes, or hand it over "
+          f"yourself:\n   lanekeeper spawn --ticket {issue.ref} {allow_line}")
+    return None
 
 
 def p_spawn_default_task() -> str:
@@ -1247,7 +1358,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_spawn = subparsers.add_parser("spawn", help="Spawn a new isolated agent worktree and allocate ports")
     p_spawn.add_argument("--name", help="Human-readable agent name (e.g. backend-1)")
     p_spawn.add_argument("--lane", help="Assigned lane, as declared in the configuration")
-    p_spawn.add_argument("--ticket", help="Ticket number; its Lane and Seat are read from the board")
+    p_spawn.add_argument("--ticket", help="Ticket number; the lane comes from the board "
+                         "(board.read) or from the ticket's own file list")
+    p_spawn.add_argument("--allow", action="append", metavar="GLOB",
+                         help="With --ticket: the files the agent may touch, when the "
+                              "ticket does not say (repeatable, or comma-separated)")
+    p_spawn.add_argument("--propose", action="store_true",
+                         help="With --ticket: ask Claude Code which files the ticket "
+                              "touches, and confirm before using them")
+    p_spawn.add_argument("--yes", action="store_true",
+                         help="Accept a --propose boundary without asking")
     p_spawn.add_argument("--task", default=p_spawn_default_task(), help="Task description")
     p_spawn.add_argument("--seat", help="Seat slot (e.g. SR1, SR2, JR1, JR2)")
     p_spawn.add_argument("--command", help="Optional CLI command/harness to start in worktree")
