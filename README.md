@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.3-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.4-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -158,6 +158,11 @@ $ lanekeeper spawn --ticket 12 --open
   • When the agent opens its pull request, label it 'lane: feat-02'. The gate fails
     the change if any file is outside the lane.
 ```
+
+Commit the policy it wrote (`git add .lanekeeper .gitignore`) before the agent commits
+anything: until you do, the agent's first `git add -A` sweeps the policy into its own
+branch, where the gate denies it — a policy change is its own lane. `spawn --ticket`
+says so when the policy is still uncommitted.
 
 The file list is the ticket's *Allowed File Paths* or *Target Modules* section. A
 ticket that names no files is refused, never guessed at: say the files yourself with

@@ -269,7 +269,7 @@ windows-latest is green. Not a regression — do not chase it.
 
 ---
 
-## Session of 2026-09-02: the one-command path — v0.7.3 (unreleased)
+## Session of 2026-09-02: the one-command path — v0.7.3
 
 The user's question after the v0.7.2 trial: *why are we doing this, and will anyone
 use it?* The honest answer given: the complaint is real (worktrees isolate the copy,
@@ -294,8 +294,37 @@ added (default scans the list; GitHub uses `gh issue view`). Tests:
 session) and mirrors the README section *Already have a backlog? One command per
 ticket*. It assumes 0.7.3 is on PyPI — the owner tags releases from the phone.
 
-**Not done:** publishing 0.7.3; the live board check (still waits on tracker PR #7
-and a `LANEKEEPER_GH_TOKEN` secret); any outside tester.
+**Released:** 0.7.3 is on PyPI (PR #52, merge `e10ecaa`). The first v0.7.3 release tagged
+the pre-merge commit and the publish workflow refused it on the VERSION check — delete
+the release *and* its tag, then re-release with target `main`.
+
+**Not done:** the live board check (still waits on tracker PR #7 and a
+`LANEKEEPER_GH_TOKEN` secret); any outside tester.
+
+---
+
+## Session of 2026-09-02 (second): the tester sheet, run for real — v0.7.4
+
+The user cannot run a terminal (mobile only), so **this session ran the tester sheet
+itself** against a fresh clone of `kish21/mini-issue-tracker` on published 0.7.3, with
+`gh` replaced by a stand-in replaying the repo's three real issues
+(`scratchpad/trial/bin/gh`). The gate was right every time. The flow around it was not,
+and both failures were nobody's mistake:
+
+1. `check` inside the agent's worktree found no policy — `spawn --ticket` writes the
+   policy in the main checkout and branches the agent from a commit without it.
+2. The agent's first `git add -A` swept that uncommitted policy into its branch, where
+   the gate denied it under an ordinary lane. Correct, and baffling.
+
+Both fixed by saying more, never by loosening the gate: `WorktreeManager.main_worktree_root()`
+lets `check` borrow the main checkout's policy (printing that it did, and that CI needs
+it committed); `ticket.policy_is_uncommitted` drives a "commit the policy first" line in
+`next_steps`, printed before the label line. Plus two cosmetics the run exposed: a branch
+name ending in `-`, and "All 1 changed file stay". `tests/test_trial_findings.py`
+reproduces all four against the released code (9 of 11 fail without the fix).
+
+**Also proven on the real tickets:** the collision report is not theoretical — FEAT-02
+and FEAT-03 both claim `src/domain/contracts.ts`, and `spawn --ticket 3` said so.
 
 ---
 
