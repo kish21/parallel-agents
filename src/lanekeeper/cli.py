@@ -712,7 +712,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     print(f"To validate: lanekeeper validate {agent_id}")
     if ticket_lane is not None:
         print()
-        print(ticket_mod.next_steps(ticket_lane, (root / check_mod.WORKFLOW_PATH).exists()))
+        print(ticket_mod.next_steps(ticket_lane, (root / check_mod.WORKFLOW_PATH).exists(),
+                                    base=worktree_mgr.get_default_branch()))
     if getattr(args, "open", False):
         # The agent exists whether or not the editor opens; a missing editor is reported
         # and the spawn still succeeded.
@@ -767,6 +768,7 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
         print(f"📁 Wrote {paths.display_config_path()} and the seat cards: this is the "
               f"first agent on this project.")
     created, widened = ticket_mod.ensure_lane(config, root, lane)
+    lane.policy_uncommitted = ticket_mod.policy_is_uncommitted(root)
     print(ticket_mod.describe(lane, created, widened))
     print()
     return lane
@@ -865,14 +867,28 @@ def cmd_check(args: argparse.Namespace) -> int:
     try:
         config = load_config(root)
     except FileNotFoundError:
-        # The first real project: the agent branched from main before the policy was
-        # merged there, so its checkout had no policy and the gate could not run.
-        print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
-              f"policy to check against.", file=sys.stderr)
-        print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
-              f"branch is made from it. Merge it there, bring it into this branch, and "
-              f"run the check again.", file=sys.stderr)
-        return 1
+        # An agent worktree branched before the policy was committed carries no policy
+        # of its own, which is the ordinary case the first time somebody spawns an
+        # agent. The policy it was spawned under is in the repository's main checkout,
+        # so read it from there and say so: it is the same boundary, but it is not the
+        # one CI will see until the policy is committed.
+        borrowed = WorktreeManager.main_worktree_root()
+        config = None
+        if borrowed is not None and borrowed != root:
+            try:
+                config = load_config(borrowed)
+            except (FileNotFoundError, ValueError):
+                config = None
+        if config is None:
+            print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
+                  f"policy to check against.", file=sys.stderr)
+            print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
+                  f"branch is made from it. Merge it there, bring it into this branch, and "
+                  f"run the check again.", file=sys.stderr)
+            return 1
+        print(f"ℹ️  This checkout has no policy of its own; reading the one in {borrowed}.")
+        print(f"   Commit the policy on '{args.base.split('/')[-1]}' so the gate in CI "
+              f"reads it too.")
     except ValueError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1

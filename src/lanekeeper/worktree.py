@@ -28,6 +28,28 @@ class WorktreeManager:
         self.root_dir = root_dir or self._find_repo_root()
 
     @staticmethod
+    def main_worktree_root() -> Optional[Path]:
+        """The repository's main checkout, seen from anywhere inside it.
+
+        A linked worktree shares the main checkout's git directory, so
+        `--git-common-dir` resolves to `<main checkout>/.git` from inside either.
+        Returns None when that shape does not hold — a bare repository, a separate
+        git directory — because the caller then has nothing better to read.
+        """
+        try:
+            res = subprocess.run(
+                ["git", "rev-parse", "--git-common-dir"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", check=True,
+            )
+        except (subprocess.CalledProcessError, OSError):
+            return None
+        common = Path(res.stdout.strip())
+        if not common.is_absolute():
+            common = (Path.cwd() / common).resolve()
+        return common.parent if common.name == ".git" else None
+
+    @staticmethod
     def _find_repo_root() -> Path:
         try:
             res = subprocess.run(
@@ -95,7 +117,9 @@ class WorktreeManager:
         text = text.lower().strip()
         text = re.sub(r"[^\w\s-]", "", text)
         text = re.sub(r"[-\s]+", "-", text)
-        return text[:40] or "task"
+        # Trim the cut back to a word boundary: a slug ending in a separator reads as
+        # a mistake on every branch listing.
+        return text[:40].strip("-") or "task"
 
     def make_branch_name(self, agent_id: str, task: str, prefix: str = "parallel/") -> str:
         task_slug = self.slugify(task)

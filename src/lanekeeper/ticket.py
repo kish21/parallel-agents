@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import subprocess
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -55,6 +56,11 @@ class TicketLane:
     collisions: List[Tuple[str, str, str]] = field(default_factory=list)
     #: Lines in the ticket's file list that were not read as paths.
     ignored_lines: Tuple[str, ...] = ()
+    #: Whether the policy this lane now lives in is still uncommitted. The agent works
+    #: in a worktree branched from a commit that does not carry it, so until the person
+    #: commits it their first `git add -A` sweeps the policy into the agent's branch —
+    #: where the gate denies it, because a policy change is its own lane.
+    policy_uncommitted: bool = False
 
     @property
     def task(self) -> str:
@@ -135,6 +141,25 @@ def ensure_lane(config: Config, root: Path, lane: TicketLane) -> Tuple[bool, Lis
     return created, widened
 
 
+def policy_is_uncommitted(root: Path, runner=None) -> bool:
+    """Whether the policy files differ from what git has recorded.
+
+    Anything but a clean status counts — untracked on a first run, modified on a later
+    one. A git that cannot answer is treated as clean: this drives a warning, and a
+    warning nobody can act on is worse than none.
+    """
+    from .paths import policy_paths
+
+    run = runner or (lambda argv: subprocess.run(
+        argv, cwd=str(root), capture_output=True, text=True,
+        encoding="utf-8", errors="replace"))
+    try:
+        res = run(["git", "status", "--porcelain", "--", *policy_paths()])
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return res.returncode == 0 and bool((res.stdout or "").strip())
+
+
 def _clean(values: Sequence[str]) -> List[str]:
     out: List[str] = []
     for value in values:
@@ -169,12 +194,19 @@ def describe(lane: TicketLane, created: bool, widened: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
-def next_steps(lane: TicketLane, gate_workflow_exists: bool) -> str:
-    lines = [f"When the agent opens its pull request, label it 'lane: {lane.name}'. "
-             f"The gate fails the change if any file is outside the lane."]
+def next_steps(lane: TicketLane, gate_workflow_exists: bool, base: str = "main") -> str:
+    lines = []
     if not gate_workflow_exists:
         lines.append("The gate is not installed yet: run 'lanekeeper check --write-workflow' "
                      "once and commit the workflow.")
+    if lane.policy_uncommitted:
+        lines.append(
+            f"Commit the policy on '{base}' before the agent commits anything. Until you "
+            f"do, its first 'git add -A' sweeps the policy into the agent's branch, and "
+            f"the gate denies that — a policy change is its own lane:\n"
+            f"      git add .lanekeeper .gitignore && git commit -m 'Add the lane policy'")
+    lines.append(f"When the agent opens its pull request, label it 'lane: {lane.name}'. "
+                 f"The gate fails the change if any file is outside the lane.")
     return "\n".join(f"  • {line}" for line in lines)
 
 

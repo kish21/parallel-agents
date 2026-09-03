@@ -188,7 +188,8 @@ def render(report: CheckReport) -> str:
     lines = [f"🛡️  LANE CHECK — lane '{report.lane}', {report.base}...{report.head}", ""]
     n = len(report.result.allowed_files)
     if report.passed:
-        lines.append(f"  ✓ All {n} changed file{'s' if n != 1 else ''} stay inside the lane.")
+        noun = "file stays" if n == 1 else "files stay"
+        lines.append(f"  ✓ All {n} changed {noun} inside the lane.")
         lines += ["", "✅ CHECK PASSED"]
     else:
         for err in report.errors:

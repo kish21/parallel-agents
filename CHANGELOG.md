@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.4] — 2026-09-02
+
+Everything here was found by running the tester sheet, start to finish, on a fresh
+clone of a real project (`kish21/mini-issue-tracker` and its three product-playbook
+tickets). The gate itself was right every time; the flow around it was not.
+
+### Fixed
+
+- **A check inside an agent's worktree could not find the policy.** `spawn --ticket`
+  writes the policy into the main checkout and branches the agent from a commit that
+  does not carry it, so the boundary check in the worktree — the one the sheet asks
+  for before pushing — failed with "this checkout has no policy". It now reads the
+  policy from the repository's main checkout (`WorktreeManager.main_worktree_root`)
+  and says both that it did and that the policy still has to be committed for CI. A
+  checkout with no policy anywhere still fails closed.
+- **The uncommitted policy turned the agent's first commit red.** `git add -A` in the
+  worktree swept `.lanekeeper/config.yaml` into the agent's branch, where the gate
+  denied it — correctly, since a policy change is its own lane, and bafflingly, since
+  nobody had touched it. `spawn --ticket` now says to commit the policy first, with
+  the command, before it mentions the label.
+- A branch name no longer ends in a separator when the task title is cut to length.
+- "All 1 changed file stays inside the lane", not "stay".
+
 ## [v0.7.3] — 2026-09-02
 
 ### Added
