@@ -634,10 +634,46 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             print(f"❌ {e}", file=sys.stderr)
             return 1
         if not card.allows_lane(args.lane):
-            scope = ", ".join(card.max_allowed_lane_scope) or "(none)"
-            print(f"❌ Seat '{default_seat}' is not permitted in lane '{args.lane}'. "
-                  f"Allowed lanes for this seat: {scope}.", file=sys.stderr)
-            return 1
+            # A lane no card has heard of is a stale card, not a decision: somebody added
+            # the lane to config.yaml by hand, which is what every message here tells them
+            # to do, and the cards were written before it existed. Reconcile and say so.
+            # A lane other cards *do* name is a real restriction on this seat, and stands.
+            known_elsewhere = any(args.lane in other.max_allowed_lane_scope
+                                  for other in registry.cards.values())
+            if known_elsewhere:
+                scope = ", ".join(card.max_allowed_lane_scope) or "(none)"
+                print(f"❌ Seat '{default_seat}' is not permitted in lane '{args.lane}'. "
+                      f"Allowed lanes for this seat: {scope}.", file=sys.stderr)
+                print(f"   Other seats may enter it; pick one with --seat, or widen this "
+                      f"card in {paths.display_capabilities_dir()}.", file=sys.stderr)
+                return 1
+            widened = []
+            for seat_name, other in sorted(registry.cards.items()):
+                if other.max_allowed_lane_scope and args.lane not in other.max_allowed_lane_scope:
+                    other.max_allowed_lane_scope.append(args.lane)
+                    save_card(other, root)
+                    widened.append(seat_name)
+            if widened:
+                print(f"ℹ️  Lane '{args.lane}' is newer than the seat cards, so no seat could "
+                      f"enter it. Added it to {', '.join(widened)}.")
+            card = registry.get(default_seat)
+
+    # One lane, one owner. Two live agents in the same lane are two agents free to edit
+    # the same files, and the gate cannot tell them apart — both pass, because both are
+    # inside the boundary. That is the exact collision this tool exists to prevent, so
+    # it is refused here rather than discovered at merge.
+    occupant = next((a for a in state_mgr.list_agents()
+                     if a.lane == args.lane and a.status not in TERMINAL_STATUSES), None)
+    if occupant is not None and not args.force:
+        print(f"❌ Lane '{args.lane}' already belongs to {occupant.id} ({occupant.name}). Two "
+              f"agents in one lane can edit the same files, and the gate passes both — "
+              f"which is the collision", file=sys.stderr)
+        print(f"   this tool exists to prevent. Give this work its own lane, or finish the "
+              f"other agent first:", file=sys.stderr)
+        print(f"     lanekeeper cleanup {occupant.id}", file=sys.stderr)
+        print(f"   If you really want two agents sharing one boundary, --force says so out "
+              f"loud.", file=sys.stderr)
+        return 1
 
     # Phase 1 (locked): reserve identity and ports. The placeholder agent record is
     # persisted inside the lock so a concurrent spawn immediately sees the ID as taken.

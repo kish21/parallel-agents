@@ -397,6 +397,35 @@ add the user Scripts directory to PATH.
 
 ---
 
+## Session of 2026-09-05 (third): three of the thirteen open issues — v0.7.7
+
+Triaged the backlog rather than working it in order. The thirteen are not thirteen
+equivalent tasks: two are deliberately frozen (#39, #33), two are already done in
+substance (#30 — `init` was reworked by demotion; #35 — the acceptance run happened
+twice on mini-issue-tracker and the deep-test protocol is its runbook), and four are
+features (#42, #25, #26, #28). Fixed the three that a real run reaches:
+
+- **#24 is the serious one.** Two agents in one lane both spawn and both `validate`
+  PASSED — reproduced before fixing. The gate cannot tell them apart because both are
+  inside the boundary, so the tool says "safe" about the exact collision it exists to
+  prevent. `cmd_spawn` now refuses a second live agent in an occupied lane (after the
+  capability checks, so a broken setup is still reported first), names the occupant,
+  and keeps `--force` for the deliberate case.
+- **#29** — a lane no seat card has heard of is a *stale card*, not a decision, because
+  every message tells people to add lanes to `config.yaml` by hand. Reconciled and said
+  aloud. A lane other cards *do* name stays a real restriction on that seat.
+- **#27** — the README install section now covers Store Python, which is where the
+  owner's own run stopped at minute one.
+
+Three existing tests packed many agents into two lanes to prove the locking is
+race-free; they now pass `--force` with a comment saying that is deliberate.
+
+**Still open and deliberately so:** #39, #33 (frozen); #42, #25, #26, #28 (features);
+#23 and #36 (partly done — the guided path is a feature slice, `init` still writes
+layers). #30 and #35 are candidates to close as done.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use

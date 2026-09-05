@@ -71,7 +71,10 @@ class TestConcurrency(unittest.TestCase):
                 seat=seat,
                 command=None,
                 env=[],
-                force=False,
+                # force=True: this test packs many agents into two lanes on purpose, to
+                # prove the locking and port allocation are race-free. One-lane-one-owner
+                # (#24) is a separate rule with its own tests.
+                force=True,
             )
             return cmd_spawn(args)
 
@@ -137,7 +140,9 @@ class TestConcurrency(unittest.TestCase):
 
         def spawn_agent(config_tuple):
             name, lane, task, seat = config_tuple
-            args = argparse.Namespace(name=name, lane=lane, task=task, seat=seat, command=None, env=[], force=False)
+            # force=True for the same reason as above: concurrency, not lane policy.
+            args = argparse.Namespace(name=name, lane=lane, task=task, seat=seat,
+                                      command=None, env=[], force=True)
             return cmd_spawn(args)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:

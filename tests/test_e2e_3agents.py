@@ -60,7 +60,10 @@ class TestE2E3Agents(unittest.TestCase):
         spawn_requests = [
             argparse.Namespace(name="backend-agent", lane="backend", task="Build Auth API", seat="SR1", command=None, env=[], force=False),
             argparse.Namespace(name="frontend-agent", lane="frontend", task="Build Login UI", seat="JR1", command=None, env=[], force=False),
-            argparse.Namespace(name="service-agent", lane="backend", task="Build Stripe Webhook", seat="JR2", command=None, env=[], force=False),
+            # force=True: this one shares `backend` with the first agent deliberately, so
+            # the workflow exercises two agents whose lanes overlap. One-lane-one-owner
+            # (#24) is a separate rule with its own tests.
+            argparse.Namespace(name="service-agent", lane="backend", task="Build Stripe Webhook", seat="JR2", command=None, env=[], force=True),
         ]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
