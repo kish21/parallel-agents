@@ -614,6 +614,34 @@ Result: FAIL (Exit code 2)
 
 ---
 
+### The same lanes, routed by GitHub
+
+`CODEOWNERS` and the lane file hold the same information — which paths belong to whom —
+and GitHub already enforces `CODEOWNERS` in every repository with nothing installed.
+
+```bash
+lanekeeper codeowners --owner @you     # or set codeowners.default_owner, or owner: per lane
+```
+
+It writes `.github/CODEOWNERS` inside managed markers, so anything you wrote by hand
+survives. Turn on *Require review from Code Owners* in branch protection and GitHub
+routes every pull request by the lanes. `lanekeeper codeowners --check` writes nothing
+and fails when the file and the lanes have drifted — one line in CI.
+
+**The order in that file is deliberate.** `CODEOWNERS` takes the **last** matching
+pattern, which is the opposite of this tool's engine, so the block is written feature
+lanes → shared zones → policy files. Hand-written rules placed *below* the block win
+over the lanes; the command counts them and tells you.
+
+This does not replace the gate, and the generated file says so. `CODEOWNERS` answers
+*who must approve this file* — after the work is done, actionable only by a person. The
+gate answers *should this branch have touched it at all* — before the work starts, and
+a failing check is feedback the agent itself can read. With one maintainer and several
+agents, every path's owner is the same person, so `CODEOWNERS` alone just renames the
+bottleneck. The full note is in [`docs/codeowners.md`](docs/codeowners.md).
+
+---
+
 ## Recovery & Diagnostics
 
 If an agent process crashes or an orphaned port is left behind:
@@ -702,6 +730,7 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
 | **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. |
 | **`lanekeeper install-gate`** | Writes the GitHub Action that runs `check` on every pull request. Once per repository. |
+| **`lanekeeper codeowners`** | Writes `.github/CODEOWNERS` from the lanes, inside managed markers, so GitHub routes reviews the same way the gate checks. `--check` fails instead of writing when the two have drifted. |
 | **`lanekeeper open`** | Opens an agent's worktree in the configured editor. |
 | **`lanekeeper board`** | Creates the GitHub project board (Lane, Owner, Seat, labels, milestones) from the configuration; `--show` reads the cards back. |
 | **`lanekeeper divide`** | Proposes how the work divides into a draft; `--confirm` re-checks your edits and writes the lanes into the policy. |

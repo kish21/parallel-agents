@@ -474,6 +474,62 @@ rather than working.
 
 ---
 
+## Session of 2026-09-05 (fifth): CODEOWNERS from the lanes — v0.7.9
+
+#42, the last of the non-frozen backlog. `lanekeeper codeowners` writes
+`.github/CODEOWNERS` from the lanes, inside managed markers. Design note:
+[`docs/codeowners.md`](docs/codeowners.md), written alongside the code.
+
+**The source is `config.yaml`, not `lanes.yaml`.** The issue says "the lane file (#34)",
+but nothing reads `lanes.yaml`; the gate reads `config.yaml` and `divide --confirm`
+writes there. A routing file generated from a document nothing enforces would drift from
+the boundary it claims to describe. The generated header names its source.
+
+**The ordering is the whole risk.** CODEOWNERS takes the *last* matching pattern; the
+lane engine takes `deny` over `allow` and a shared zone over both. So emission is that
+precedence backwards — feature lanes, shared zones, policy files last — and
+`TestOrdering` pins it with the case that would be silent otherwise: a feature lane whose
+`allow` covers the shared store.
+
+**Two more things that would be silently wrong.** An unanchored CODEOWNERS pattern
+matches at every level, so every pattern is anchored with `/` (except one already
+anchored, or written `**/…`); `!`, `[a-z]` and `?` have no equivalent and are *not
+written*, with the reason on a comment line beside the lane. Over 3 MB GitHub stops
+loading the file entirely and says nothing, so the command refuses to write one that big
+rather than switching the routing off for the user.
+
+- `LaneConfig.owner` (a handle or a list, `_owner_list` accepts both) and a
+  `codeowners:` section (`path`, `default_owner`). `--owner @handle` overrides for a
+  run. A lane nobody owns gets **no rule** — an owner-less line is a syntax error and
+  inventing an owner routes reviews to somebody who never agreed to them.
+- `--check` writes nothing and fails on drift; one line in CI.
+- `uninit` removes the managed block too, and the file with it when nothing else was in
+  it. `check.policy_lane_paths()` gained `.github/CODEOWNERS`; `paths.policy_paths()`
+  deliberately did **not**, so a repository whose lane already owned `.github/**` does
+  not lose it to a feature it has not turned on.
+
+**The code review found seven, all real, all reproduced.** Worth recording because six
+of them write a file that *looks* right and routes reviews wrong: the policy rule was
+conditional on `default_owner` (a repo using per-lane `owner:` got none, and `**/*.yaml`
+then owned the lane file); `policy_lane_paths` and `uninit` both hardcoded
+`.github/CODEOWNERS` while the path is configurable; the "nothing to write" message
+asked for an owner the lane already had when the real cause was untranslatable
+patterns; a space in a path rendered a line GitHub reads as a different pattern with a
+nonsense owner; an owner missing its `@` was written and reported as success; and
+`merge` trusted that two markers meant a block — an orphan `BEGIN` silently ate the
+lines below it. `TestTheReviewFindings` pins all seven.
+
+Tests: `tests/test_codeowners.py` (37), plus two in `test_uninit.py`. Suite green (654).
+
+**Not done, and it is the definition of done's last clause:** GitHub has not been
+observed showing the expected owner on a real pull request. That needs a repository with
+branch protection and *Require review from Code Owners* switched on — the same missing
+live check as `lanekeeper board`.
+
+**Open after this:** #39 and #33 (frozen), #36 (their umbrella). Nothing else.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use

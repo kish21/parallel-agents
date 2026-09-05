@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from . import codeowners as codeowners_mod
 from . import paths
 from .check import WORKFLOW_PATH
 from .ports import TERMINAL_STATUSES
@@ -40,13 +41,19 @@ class UninitPlan:
     branches: List[str] = field(default_factory=list)
     workflows: List[Path] = field(default_factory=list)
     gitignore_block: bool = False
+    codeowners_block: bool = False
+    #: Where that block is. Read from the configuration, because a project may keep
+    #: CODEOWNERS at the repository root and a hardcoded path would leave our own
+    #: block behind while reporting that lanekeeper was removed.
+    codeowners: Path = Path(codeowners_mod.DEFAULT_PATH)
     live_agents: List[str] = field(default_factory=list)
     tracked: List[str] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
         return not (self.home or self.worktrees or self.branches
-                    or self.workflows or self.gitignore_block)
+                    or self.workflows or self.gitignore_block
+                    or self.codeowners_block)
 
 
 def _tracked_paths(worktree_mgr: WorktreeManager, candidates: List[str]) -> List[str]:
@@ -70,7 +77,8 @@ def _tracked_paths(worktree_mgr: WorktreeManager, candidates: List[str]) -> List
 def build_plan(root: Path, worktree_mgr: WorktreeManager,
                agents: Optional[List] = None,
                branch_prefix: str = "parallel/",
-               gitignore_marker: str = "") -> UninitPlan:
+               gitignore_marker: str = "",
+               codeowners_path: str = codeowners_mod.DEFAULT_PATH) -> UninitPlan:
     """Everything `uninit` can see, gathered before a single thing is removed.
 
     `agents` is the recorded state when it could be read at all; a repository whose
@@ -123,7 +131,18 @@ def build_plan(root: Path, worktree_mgr: WorktreeManager,
         except OSError:
             plan.gitignore_block = False
 
+    codeowners = root / (codeowners_path or codeowners_mod.DEFAULT_PATH)
+    if codeowners.exists():
+        plan.codeowners = Path(codeowners_path or codeowners_mod.DEFAULT_PATH)
+        try:
+            plan.codeowners_block = codeowners_mod.BEGIN in codeowners.read_text(
+                encoding="utf-8")
+        except OSError:
+            plan.codeowners_block = False
+
     candidates = [p.relative_to(root).as_posix() for p in plan.workflows]
+    if plan.codeowners_block:
+        candidates.append(plan.codeowners.as_posix())
     if plan.home is not None:
         candidates.append(paths.home_dirname(root))
     plan.tracked = _tracked_paths(worktree_mgr, candidates)
@@ -179,6 +198,9 @@ def render(plan: UninitPlan) -> str:
         lines.append(f"  - {_display(plan.root, wf)}")
     if plan.gitignore_block:
         lines.append("  - lanekeeper's managed block in .gitignore")
+    if plan.codeowners_block:
+        lines.append(f"  - lanekeeper's managed block in {plan.codeowners.as_posix()} "
+                     f"(anything you wrote by hand around it stays)")
 
     if plan.tracked:
         lines.append("")
@@ -196,6 +218,19 @@ def _display(root: Path, target: Path) -> str:
         return target.relative_to(root).as_posix()
     except ValueError:
         return str(target)
+
+
+def _strip_managed(target: Path, begin: str, end: str, label: str) -> List[str]:
+    """Removes one managed block, and the file with it when nothing else was in it."""
+    try:
+        stripped = strip_gitignore_block(target.read_text(encoding="utf-8"), begin, end)
+        if stripped.strip():
+            target.write_text(stripped, encoding="utf-8")
+        else:
+            target.unlink()
+        return [f"Removed lanekeeper's block from {label}."]
+    except OSError as exc:
+        return [f"Could not edit {label}: {exc}"]
 
 
 def apply(plan: UninitPlan, worktree_mgr: WorktreeManager,
@@ -252,6 +287,11 @@ def apply(plan: UninitPlan, worktree_mgr: WorktreeManager,
             done.append(f"Removed {_display(plan.root, wf)}.")
         except OSError as exc:
             done.append(f"Could not remove {_display(plan.root, wf)}: {exc}")
+
+    if plan.codeowners_block:
+        done.extend(_strip_managed(plan.root / plan.codeowners,
+                                   codeowners_mod.BEGIN, codeowners_mod.END,
+                                   plan.codeowners.as_posix()))
 
     if plan.gitignore_block and begin and end:
         gitignore = plan.root / ".gitignore"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
@@ -35,6 +36,11 @@ class LaneConfig:
     name: str
     allow: List[str] = field(default_factory=list)
     deny: List[str] = field(default_factory=list)
+    #: Who reviews changes to this lane's paths, as GitHub sees it: `@handle` or
+    #: `@org/team`, one or several. Written into CODEOWNERS and nothing else — the gate
+    #: has never needed to know who a person is, and still does not. Empty means the
+    #: `codeowners.default_owner`, which on a one-maintainer repository is everybody.
+    owner: List[str] = field(default_factory=list)
     #: A lane nobody is spawned into: the shared middle of a feature-split repository —
     #: the store, the shared types, the page files every feature has to touch. Under a
     #: feature split that code is not a configuration defect to be tidied away, it is a
@@ -162,6 +168,18 @@ class BoardConfig:
 
 
 @dataclass
+class CodeownersConfig:
+    """`lanekeeper codeowners`: the lanes written out as the file GitHub enforces.
+
+    `default_owner` is what a lane without its own `owner` gets. On a repository with
+    one maintainer that is the whole configuration; a team names owners per lane.
+    """
+
+    path: str = ".github/CODEOWNERS"
+    default_owner: List[str] = field(default_factory=list)
+
+
+@dataclass
 class IntakeConfig:
     """Step 1 of `lanekeeper start`: where the work is written down, and what to
     compare it against. See docs/start-step1-intake.md."""
@@ -283,6 +301,7 @@ class Config:
     divide: DivideConfig = field(default_factory=DivideConfig)
     editor: EditorConfig = field(default_factory=EditorConfig)
     board: BoardConfig = field(default_factory=BoardConfig)
+    codeowners: CodeownersConfig = field(default_factory=CodeownersConfig)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -377,7 +396,8 @@ class Config:
                     "allow": lane.allow,
                     "deny": lane.deny,
                     # Written only when set, so an ordinary lane's entry reads exactly
-                    # as it did before this existed.
+                    # as it did before these existed.
+                    **({"owner": list(lane.owner)} if lane.owner else {}),
                     **({"shared": True} if lane.shared else {}),
                 }
                 for lane in self.lanes.values()
@@ -412,6 +432,10 @@ class Config:
             "editor": {
                 "command": self.editor.command,
                 "args": list(self.editor.args),
+            },
+            "codeowners": {
+                "path": self.codeowners.path,
+                "default_owner": list(self.codeowners.default_owner),
             },
             "board": {
                 "title": self.board.title,
@@ -480,6 +504,7 @@ class Config:
         divide_data = data.get("divide", {}) or {}
         editor_data = data.get("editor", {}) or {}
         board_data = data.get("board", {}) or {}
+        codeowners_data = data.get("codeowners", {}) or {}
 
         lanes = {}
         if isinstance(lanes_data, list):
@@ -539,6 +564,11 @@ class Config:
                 read=bool(board_data.get("read", False)),
                 command=str(board_data.get("command") or "gh"),
             ),
+            codeowners=CodeownersConfig(
+                path=str(codeowners_data.get("path") or CodeownersConfig().path),
+                default_owner=owner_list(
+                    "codeowners.default_owner", codeowners_data.get("default_owner")),
+            ),
         )
 
 
@@ -571,6 +601,42 @@ def _patterns(lane_name: str, key: str, raw: Any) -> List[str]:
     return patterns
 
 
+#: What GitHub accepts on the right-hand side of a CODEOWNERS line: a user, a team, or
+#: an email address. Validated here because a handle written without its `@` is not an
+#: error GitHub reports — the line is simply ignored, the routing silently does not
+#: happen, and the command that wrote it said it succeeded.
+_OWNER_RE = re.compile(
+    r"^@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:/[A-Za-z0-9._-]+)?$"
+    r"|^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def owner_list(label: str, raw: Any) -> List[str]:
+    """A GitHub owner, written as one handle or as a list of them.
+
+    One handle is the common case and having to write it as a list would be a papercut
+    on the very first configuration somebody edits, so both spellings are accepted and
+    only one shape reaches the rest of the code.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [str(v) for v in raw]
+    else:
+        raise InvalidLaneError(
+            f"{label} must be a GitHub handle like '@you', or a list of them "
+            f"(found {type(raw).__name__}).")
+    owners = [v.strip() for v in values if str(v).strip()]
+    for owner in owners:
+        if not _OWNER_RE.match(owner):
+            raise InvalidLaneError(
+                f"{label}: '{owner}' is not something GitHub can route a review to. "
+                f"Write a user as '@kish21', a team as '@org/reviewers', or an email "
+                f"address. GitHub ignores a line it cannot parse without reporting it.")
+    return owners
+
+
 def _parse_lane(lane_name: str, raw: Any) -> LaneConfig:
     if not isinstance(raw, dict):
         raise InvalidLaneError(
@@ -587,12 +653,14 @@ def _parse_lane(lane_name: str, raw: Any) -> LaneConfig:
             f"Lane '{lane_name}' allows nothing. A lane with no 'allow' patterns would "
             f"pass every file, so it is refused rather than read as permissive. Name "
             f"the paths this lane owns, or remove the lane.")
+    owner = owner_list(f"Lane '{lane_name}': 'owner'", raw.get("owner"))
     shared = raw.get("shared", False)
     if not isinstance(shared, bool):
         raise InvalidLaneError(
             f"Lane '{lane_name}': 'shared' must be true or false, not {shared!r}. "
             f"A shared lane is one nobody is spawned into.")
-    return LaneConfig(name=lane_name, allow=allow, deny=deny, shared=shared)
+    return LaneConfig(name=lane_name, allow=allow, deny=deny, shared=shared,
+                      owner=owner)
 
 
 class InvalidIntakeSettingError(ValueError):
