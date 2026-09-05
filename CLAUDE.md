@@ -31,9 +31,9 @@ its API route, its React page and its tests — not `backend`. An ordinary ticke
 five files across four layers; under a layer split that is one ticket against four
 lanes, and every ticket becomes a four-way escalation.
 
-The tool's own `layout.py` still detects backend/frontend/data/platform and teaches the
-opposite. That is issue #23, and it is a known contradiction between what the README
-argues and what `init` does.
+`layout.py` still detects backend/frontend/data/platform, but it is the fallback now, not
+the default: `init` reads feature slices from the tree first and falls back to layers only
+when the tree names fewer than two (#23, v0.7.8). `--layers` forces the old split.
 
 ## The `start` vs `init` decision (2026-09-01, settled)
 
@@ -423,6 +423,54 @@ race-free; they now pass `--force` with a comment saying that is deliberate.
 **Still open and deliberately so:** #39, #33 (frozen); #42, #25, #26, #28 (features);
 #23 and #36 (partly done — the guided path is a feature slice, `init` still writes
 layers). #30 and #35 are candidates to close as done.
+
+---
+
+## Session of 2026-09-05 (fourth): four more of the open issues — v0.7.8
+
+Worked the backlog while the owner was away. Four issues, chosen because a real run
+reaches all four; nothing was closed by re-reading it.
+
+- **#23 — `init` splits by feature.** It used `layout.ROLE_BY_DIR_NAME` and wrote
+  backend/frontend/data/platform. It now calls `divide.codebase.slices` first — the same
+  reading `divide` uses — and adopts feature lanes when the tree names two or more,
+  falling back to layers otherwise. `--layers` forces the old split. The fallback still
+  says out loud that layers are what it wrote. `test_layout_detection`'s monorepo test
+  now passes `--layers`, with a second test for the feature reading beside it.
+- **#25 — `shared: true` on a lane.** Nobody is spawned into it (`cmd_spawn` refuses by
+  name) and the gate checks shared zones **before** the acting lane's own `allow`, in
+  `LaneEngine.check_file`. That order is the whole point: two feature lanes usually both
+  list the tree the shared store sits in, so an overlap-only reading would be silent in
+  the case the zone exists for. New violation reason `shared`, new field
+  `LaneViolation.shared_lane`; `validate` and `check` say *raise it*, not *out of lane*.
+  The lane owning the zone may change it — that is the escalated change.
+- **#26 — `lanekeeper uninit`.** `src/lanekeeper/uninit.py`: build the plan, print it,
+  ask, carry it out. Worktrees, fully merged agent branches, `.lanekeeper/`, the
+  `lanekeeper-*.yml` workflows, the managed `.gitignore` block. An unmerged branch is
+  kept **even with `--force`**. Two traps found while building it: `StateManager`
+  creates its own directory on construction, so nothing is read until `paths.home()`
+  exists (otherwise `uninit` created what it then offered to remove), and a damaged
+  ledger must not stop it — `uninit` is the way out of a broken setup.
+- **#28 — global `--repo` / `-C`.** One validated `chdir` in `main()`, which covers all
+  thirteen `root = Path.cwd()` sites. Accepted after the subcommand too, via a loop over
+  `subparsers.choices` with `default=argparse.SUPPRESS` — an ordinary default there
+  overwrites the value given before the subcommand, because argparse copies subparser
+  defaults over the namespace it was handed. `board --repo OWNER/NAME` got there first
+  and means a GitHub repository: it is skipped in that loop and the global flag uses
+  `dest="repo_root"`, so board's value is never read as a path to enter.
+
+Tests: `tests/test_init_feature_lanes.py`, `tests/test_shared_lanes.py`,
+`tests/test_uninit.py`, `tests/test_repo_flag.py`. Full suite green (615).
+
+**Left open, deliberately:** #39 and #33 (frozen by an earlier decision — dependency vs
+collision, and how many agents); #36 (umbrella: steps 3 and 5 are the two frozen ones);
+#42 (CODEOWNERS from the lane file — worth doing, and a session of its own: last-match-wins
+ordering and the managed-block rules are the whole of it); #30 and #35, which are done in
+substance (`init` was reworked by demotion and now by #23; the acceptance run happened
+twice on mini-issue-tracker and the deep-test protocol is its runbook) and want closing
+rather than working.
+
+**Still unverified:** `lanekeeper board` against a live GitHub project.
 
 ---
 

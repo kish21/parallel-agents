@@ -35,6 +35,12 @@ class LaneConfig:
     name: str
     allow: List[str] = field(default_factory=list)
     deny: List[str] = field(default_factory=list)
+    #: A lane nobody is spawned into: the shared middle of a feature-split repository —
+    #: the store, the shared types, the page files every feature has to touch. Under a
+    #: feature split that code is not a configuration defect to be tidied away, it is a
+    #: permanent state that needs enforcing, so it gets a lane whose owner is nobody on
+    #: purpose. A change touching it is escalated, not rejected as out-of-lane. #25.
+    shared: bool = False
 
 
 @dataclass
@@ -370,6 +376,9 @@ class Config:
                     "name": lane.name,
                     "allow": lane.allow,
                     "deny": lane.deny,
+                    # Written only when set, so an ordinary lane's entry reads exactly
+                    # as it did before this existed.
+                    **({"shared": True} if lane.shared else {}),
                 }
                 for lane in self.lanes.values()
             ],
@@ -578,7 +587,12 @@ def _parse_lane(lane_name: str, raw: Any) -> LaneConfig:
             f"Lane '{lane_name}' allows nothing. A lane with no 'allow' patterns would "
             f"pass every file, so it is refused rather than read as permissive. Name "
             f"the paths this lane owns, or remove the lane.")
-    return LaneConfig(name=lane_name, allow=allow, deny=deny)
+    shared = raw.get("shared", False)
+    if not isinstance(shared, bool):
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': 'shared' must be true or false, not {shared!r}. "
+            f"A shared lane is one nobody is spawned into.")
+    return LaneConfig(name=lane_name, allow=allow, deny=deny, shared=shared)
 
 
 class InvalidIntakeSettingError(ValueError):

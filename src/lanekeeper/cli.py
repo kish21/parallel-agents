@@ -26,7 +26,7 @@ from .capabilities import (
     default_cards,
     save_card,
 )
-from .config import Config, UnknownLaneError, load_config, save_config
+from .config import Config, LaneConfig, UnknownLaneError, load_config, save_config
 from . import check as check_mod
 from . import board as board_mod
 from . import handoff
@@ -43,7 +43,9 @@ from .divide.presenter import render as render_division, render_confirmation
 from .trackers import UnknownTrackerError, get_tracker
 from .trackers.base import TrackerError
 from . import ticket as ticket_mod
+from . import uninit as uninit_mod
 from .divide import boundary as divide_boundary
+from .divide import codebase as divide_codebase
 from .layout import detect_layout, measure_coverage, tracked_files
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
@@ -364,11 +366,32 @@ def cmd_init(args: argparse.Namespace) -> int:
     # Derive lanes from the repository that exists. The stock lanes assume backend/ and
     # frontend/ directories; on a project laid out any other way they match nothing, and
     # the first validate fails on legitimate work.
+    #
+    # A feature slice is tried first and a technology layer only after it fails. That
+    # order is issue #23: `detect_layout` answers "what kind of code is this" and
+    # returns `backend`, which makes an ordinary ticket — service, schema, route, page,
+    # test — a four-way escalation against four lanes. `codebase.slices` answers "which
+    # feature is this", which is the split this tool exists to make. Two slices is the
+    # bar: one lane is nothing to run in parallel, and a single name read out of a tree
+    # is a weak reading, not a division.
     detection = None
+    feature_slices: List = []
     if not getattr(args, "generic", False):
-        detection = detect_layout(root)
-        if detection.is_meaningful:
-            cfg.lanes = detection.lanes
+        if not getattr(args, "layers", False):
+            try:
+                feature_slices, _ = divide_codebase.slices(root, cfg.divide)
+            except Exception:
+                # Reading the tree is a convenience; a repository it cannot read still
+                # gets a working configuration from the layout detector below.
+                feature_slices = []
+        if len(feature_slices) >= 2:
+            cfg.lanes = {s.name: LaneConfig(name=s.name, allow=list(s.paths))
+                         for s in feature_slices}
+        else:
+            feature_slices = []
+            detection = detect_layout(root)
+            if detection.is_meaningful:
+                cfg.lanes = detection.lanes
 
     # Write the URL variables under the prefixes this repository's frontends can actually
     # read. Without them the generated .env carries ports the browser bundle cannot see,
@@ -393,17 +416,33 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     coverage, total, uncovered = measure_coverage(root, cfg.lanes)
     lane_names = ", ".join(sorted(cfg.lanes))
-    if detection is not None and detection.is_meaningful:
-        print(f"🧭 Detected {len(cfg.lanes)} lanes from the repository layout: {lane_names}")
+    if feature_slices:
+        print(f"🧭 Found {len(cfg.lanes)} feature slices in this repository: {lane_names}")
+        print("   A lane is a feature top to bottom — its service, its page, its tests —")
+        print("   read from your directory names. Check the paths in config.yaml.")
     else:
-        print(f"🧭 Using generic starter lanes: {lane_names}")
-    # These lanes are named after what kind of code a directory holds. That is the
-    # opposite of the split this tool argues for — a lane is a feature, top to bottom —
-    # and it stays here only as the direct route for someone who already knows their
-    # lanes. Said out loud so nobody mistakes the escape hatch for the front door.
-    print("   These are technology layers, a starting point only. 'lanekeeper start'")
-    print("   divides by feature from your tickets and writes the same file.")
+        if detection is not None and detection.is_meaningful:
+            print(f"🧭 Detected {len(cfg.lanes)} lanes from the repository layout: {lane_names}")
+        else:
+            print(f"🧭 Using generic starter lanes: {lane_names}")
+        # Nothing in this tree repeated a feature name on both sides of the stack, so
+        # what is left is what kind of code each directory holds. That is the opposite
+        # of the split this tool argues for, and saying so is the only thing that stops
+        # the fallback being mistaken for the recommendation.
+        print("   These are technology layers, a starting point only. 'lanekeeper start'")
+        print("   divides by feature from your tickets and writes the same file.")
     print(f"   Coverage: {coverage:.0%} of {total} tracked files fall inside a lane.")
+
+    if feature_slices and uncovered and coverage >= 0.5:
+        # A feature split leaves the shared parts of a repository — infrastructure, the
+        # root files, whatever belongs to no feature — owned by nobody, and nobody means
+        # no lane may touch them. That is the safe reading and it is also issue #25, so
+        # it is named here rather than discovered when the gate refuses a legitimate
+        # edit to a file the person never thought about.
+        print(f"   Owned by no lane: {', '.join(uncovered[:3])}"
+              + (f" and {len(uncovered) - 3} more" if len(uncovered) > 3 else ""))
+        print("   No agent may change those. Add them to a lane, or declare a lane with")
+        print("   'shared: true' so a change there is escalated rather than simply refused.")
 
     if total and coverage < 0.5:
         print("\n⚠️  These lanes match little of this repository, so validation will report")
@@ -611,6 +650,18 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         known = ", ".join(sorted(config.lanes)) or "(none declared)"
         print(f"❌ Unknown lane '{args.lane}'. Declared lanes: {known}.", file=sys.stderr)
         print(f"   Add the lane to {paths.display_config_path()}, or spawn into an existing one.", file=sys.stderr)
+        return 1
+
+    # A shared zone has no owner on purpose (#25). Spawning an agent into it would give
+    # that zone exactly the single owner it is declared not to have, and every other
+    # lane would then be told to escalate changes to a file an agent was busy editing.
+    if config.get_lane(args.lane).shared:
+        print(f"❌ Lane '{args.lane}' is shared code: it belongs to no agent on purpose.",
+              file=sys.stderr)
+        print("   Every lane depends on it, so a change there is decided by the person who "
+              "owns the policy", file=sys.stderr)
+        print("   and made on the main checkout. Spawn into the feature lane whose work "
+              "needs it.", file=sys.stderr)
         return 1
 
     # A seat must have a capability card whenever gates are configured, and its card must
@@ -1076,7 +1127,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
         print(f"❌ {e}", file=sys.stderr)
         print(f"   Agent '{agent.id}' cannot be diffed against an undeclared lane.", file=sys.stderr)
         return 1
-    lane_res = LaneEngine.validate_files(changed_files, lane_config)
+    lane_res = LaneEngine.validate_files(
+        changed_files, lane_config, LaneEngine.shared_lanes(config))
 
     print(f"\n📝 DIFF SUMMARY FOR {agent.name} ({agent.id})")
     print(f"Branch: {agent.branch}")
@@ -1166,6 +1218,74 @@ def cmd_validate(args: argparse.Namespace) -> int:
     else:
         print("❌ VALIDATION FAILED: Must resolve errors before merging.")
         return 2
+
+
+def cmd_uninit(args: argparse.Namespace) -> int:
+    """Takes lanekeeper back out of the repository. See uninit.py and issue #26.
+
+    The whole command is: build the plan, show it, ask, carry it out. It reads state
+    if state can be read and carries on without it if it cannot — a repository nobody
+    can undo because its ledger is damaged is the worst version of this.
+    """
+    root = Path.cwd()
+    worktree_mgr = WorktreeManager(root)
+    if not worktree_mgr.is_git_repo():
+        print("❌ Error: Must run inside a valid Git repository root.", file=sys.stderr)
+        return 1
+
+    agents: List[AgentState] = []
+    branch_prefix = "parallel/"
+    # Nothing is read until we know the directory is there. `StateManager` creates its
+    # own state directory on construction, so asking it first would make `uninit`
+    # create the very thing it then offers to remove — and report work to do on a
+    # repository that has never seen lanekeeper.
+    if paths.home(root).exists():
+        try:
+            agents = StateManager(root).list_agents()
+        except Exception:
+            # Deliberately broad, and deliberately silent: `uninit` is the way out of a
+            # broken setup, so a state file it cannot read must not stop it.
+            agents = []
+        try:
+            branch_prefix = load_config(root).git.branch_prefix
+        except Exception:
+            pass
+
+    plan = uninit_mod.build_plan(
+        root, worktree_mgr, agents=agents, branch_prefix=branch_prefix,
+        gitignore_marker=GITIGNORE_BEGIN)
+
+    if plan.is_empty:
+        print("ℹ️  Nothing to remove — this repository has no lanekeeper files in it.")
+        return 0
+
+    if plan.live_agents and not args.force:
+        print("❌ Agents are still live: " + ", ".join(plan.live_agents), file=sys.stderr)
+        print("   Stop and clean each one first ('lanekeeper cleanup <agent>'), or pass "
+              "--force to remove them along with everything else.", file=sys.stderr)
+        return 1
+
+    print(uninit_mod.render(plan))
+    print()
+    if not args.force:
+        try:
+            confirm = input("Remove all of that? [y/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n❌ Aborted: nothing answered. Re-run with --force to remove it all.",
+                  file=sys.stderr)
+            return 1
+        if confirm != "y":
+            print("❌ Aborted. Nothing was removed.")
+            return 1
+
+    print()
+    for line in uninit_mod.apply(plan, worktree_mgr, GITIGNORE_BEGIN, GITIGNORE_END):
+        print(f"   {line}")
+    print()
+    print("✅ Lanekeeper is out of this repository.")
+    if plan.tracked:
+        print("   Committed files were removed, so commit the deletion when you are ready.")
+    return 0
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
@@ -1375,6 +1495,14 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"lanekeeper {__version__}",
         help="Show the installed lanekeeper version and exit",
     )
+    # Every command starts from `Path.cwd()`, so pointing lanekeeper at another project
+    # used to mean cd-ing into it — and needing an install reachable from that shell,
+    # which a project with its own virtual environment does not give you. The whole of
+    # `--repo` is one chdir performed in `main()` before any command runs; doing it per
+    # command would be thirteen places to forget. `-C` is git's spelling. Issue #28.
+    parser.add_argument(
+        "--repo", "-C", metavar="PATH", dest="repo_root", default=None,
+        help="Run against this repository instead of the current directory")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # init
@@ -1401,7 +1529,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Show each card's Lane, Owner and Seat instead of creating")
     p_board.add_argument("--dry-run", action="store_true", help="Print every action, change nothing")
     p_board.add_argument("--check", action="store_true", help="Report the current state and exit")
-    p_board.add_argument("--repo", help="OWNER/NAME to configure (default: this repository)")
+    # `board` had a `--repo` first and it means a GitHub OWNER/NAME, not a directory.
+    # It keeps it; the global form goes before the subcommand: `lanekeeper --repo <path> board`.
+    p_board.add_argument("--repo", help="GitHub OWNER/NAME to configure (default: this repository)")
     p_board.set_defaults(func=cmd_board)
 
     p_intake = subparsers.add_parser(
@@ -1430,6 +1560,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--force", action="store_true", help="Overwrite existing configuration")
     p_init.add_argument("--generic", action="store_true",
                         help="Use the generic starter lanes instead of detecting the repository layout")
+    p_init.add_argument("--layers", action="store_true",
+                        help="Split by technology layer (backend/frontend/...) instead of by feature")
     p_init.set_defaults(func=cmd_init)
 
     # doctor
@@ -1548,6 +1680,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_cln.add_argument("--force", action="store_true", help="Force deletion even if uncommitted changes exist")
     p_cln.set_defaults(func=cmd_cleanup)
 
+    # uninit
+    p_uni = subparsers.add_parser(
+        "uninit", help="Remove lanekeeper from this repository (worktrees, branches, config)")
+    p_uni.add_argument(
+        "--force", action="store_true",
+        help="Do not ask, and remove live agents' worktrees too")
+    p_uni.set_defaults(func=cmd_uninit)
+
+    # `--repo` is accepted after the subcommand as well, because that is where people
+    # type it. SUPPRESS is not decoration: argparse copies a subparser's defaults over
+    # the namespace it was handed, so an ordinary default here would wipe out the value
+    # given before the subcommand.
+    for sub in subparsers.choices.values():
+        if any("--repo" in a.option_strings for a in sub._actions):
+            # `board --repo OWNER/NAME` got there first and means something else.
+            continue
+        sub.add_argument("--repo", "-C", metavar="PATH", dest="repo_root",
+                         default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+
     return parser
 
 
@@ -1560,12 +1711,44 @@ def _add_step1_flags(parser: argparse.ArgumentParser) -> None:
         help="Ignore what a previous run decided and check again from scratch")
 
 
+def enter_repo(path: str) -> Optional[str]:
+    """Move the process into another repository. Returns an error message, or None.
+
+    Returns the message rather than printing it so the caller decides where it goes,
+    and so a test can read it. Everything a command needs is derived from the working
+    directory, which is exactly why this is the only place `--repo` has to exist.
+    """
+    target = Path(path).expanduser()
+    if not target.is_dir():
+        return f"--repo {path}: no such directory."
+    try:
+        os.chdir(target)
+    except OSError as exc:
+        return f"--repo {path}: {exc}."
+    mgr = WorktreeManager(Path.cwd())
+    top = mgr.repo_toplevel() if mgr.is_git_repo() else None
+    if top is None:
+        return (f"--repo {path} is not inside a Git repository. "
+                f"Lanekeeper works on a repository root — the directory holding .git.")
+    if top.resolve() != Path.cwd().resolve():
+        # Silently initialising one level down would produce a second, half-working
+        # setup that the gate in CI never reads, and nothing would say why.
+        return (f"--repo {path} is inside a repository but is not its root. "
+                f"Use --repo {top.as_posix()}")
+    return None
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     if not hasattr(args, "func"):
         parser.print_help()
         sys.exit(1)
+    if getattr(args, "repo_root", None):
+        problem = enter_repo(args.repo_root)
+        if problem:
+            print(f"❌ {problem}", file=sys.stderr)
+            sys.exit(1)
     try:
         sys.exit(args.func(args))
     except StateCorruptError as e:
