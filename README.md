@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.4-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.5-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**

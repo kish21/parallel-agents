@@ -190,10 +190,26 @@ class WorktreeManager:
         return resolved_path
 
     def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        """Whether the worktree holds work that would be lost.
+
+        Lanekeeper writes `.lane` and `.env` into every worktree it creates, so a
+        worktree where nobody has done anything is still "dirty" to git. Counting
+        those made `cleanup` demand `--force` on an agent that never ran, which
+        teaches people to pass `--force` always — exactly the habit the question
+        exists to prevent.
+        """
+        from .lanes import LaneEngine  # local: lanes imports config, config imports nothing here
+
         if not worktree_path.exists():
             return False
         res = self._run_git(["status", "--porcelain"], cwd=worktree_path, check=False)
-        return bool(res.stdout.strip())
+        for line in (res.stdout or "").splitlines():
+            path = line[3:].strip().strip('"')
+            # A rename reads "old -> new"; either side is somebody's work.
+            path = path.split(" -> ")[-1] if " -> " in path else path
+            if path and not LaneEngine.is_bookkeeping(LaneEngine.normalize_path(path)):
+                return True
+        return False
 
     def get_changed_files(
         self,
@@ -293,10 +309,11 @@ class WorktreeManager:
                 f"Worktree at {resolved_path} has uncommitted changes. Use force=True to discard."
             )
 
-        cmd = ["worktree", "remove", str(resolved_path)]
-        if force:
-            cmd.append("--force")
-        self._run_git(cmd)
+        # Past our own guard, the removal is always forced at the git level: the `.lane`
+        # and `.env` we wrote are untracked, and git refuses a plain `worktree remove`
+        # over them. Whether any of the person's work is at stake was decided above, by
+        # `has_uncommitted_changes`, which ignores exactly those two files.
+        self._run_git(["worktree", "remove", "--force", str(resolved_path)])
         self.prune()
 
     def prune(self) -> None:

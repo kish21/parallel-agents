@@ -621,8 +621,12 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     if config.capability_gates:
         if registry.is_empty:
             print("❌ Capability gates are configured but no capability cards were found.", file=sys.stderr)
-            print(f"   Expected cards in {paths.display_capabilities_dir()}. Run 'lanekeeper init --force'", file=sys.stderr)
-            print("   to write the starter cards, or remove capability_gates from config.yaml.", file=sys.stderr)
+            print(f"   Expected cards in {paths.display_capabilities_dir()}. Restore them "
+                  f"(git checkout {paths.display_capabilities_dir()}), or remove the",
+                  file=sys.stderr)
+            print("   capability_gates section from config.yaml. Do not run 'lanekeeper init "
+                  "--force' to get them:", file=sys.stderr)
+            print("   it also replaces your lanes with technology layers.", file=sys.stderr)
             return 1
         try:
             card = registry.get(default_seat)
@@ -1016,12 +1020,14 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
     print(f"\n📝 DIFF SUMMARY FOR {agent.name} ({agent.id})")
     print(f"Branch: {agent.branch}")
-    print(f"Total Modified Files: {len(changed_files)}\n")
+    # Bookkeeping files (.lane, .env) are written by lanekeeper itself and are not
+    # listed below, so counting them here made the total disagree with the list.
+    shown = [f for f in changed_files
+             if not LaneEngine.is_bookkeeping(LaneEngine.normalize_path(f))]
+    print(f"Total Modified Files: {len(shown)}\n")
 
-    for f in changed_files:
+    for f in shown:
         norm_f = LaneEngine.normalize_path(f)
-        if LaneEngine.is_bookkeeping(norm_f):
-            continue
 
         violation = None
         for v in lane_res.violations:
@@ -1127,7 +1133,17 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     if worktree_path.exists() and worktree_mgr.has_uncommitted_changes(worktree_path):
         if not force:
             print(f"⚠️ Agent '{agent.name}' has uncommitted changes in {worktree_path}.")
-            confirm = input("Are you sure you want to delete this worktree? [y/N]: ").strip().lower()
+            # There is not always somebody to answer: a pipe with nothing in it, a
+            # script, a CI job. An unanswerable question is not consent to delete
+            # work, so it aborts and names the flag that means yes — never with the
+            # traceback a bare input() gave the first person to run this unattended.
+            # An answer that *is* piped in still counts; that is a separate fix.
+            try:
+                confirm = input("Are you sure you want to delete this worktree? [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\n❌ Cleanup aborted: nothing answered. Re-run with --force to "
+                      "delete the worktree and the changes in it.", file=sys.stderr)
+                return 1
             if confirm != "y":
                 print("❌ Cleanup aborted. Changes preserved.")
                 return 1
