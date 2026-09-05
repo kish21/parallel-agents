@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.6-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.7-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -25,8 +25,35 @@ issues written by product-playbook.
 ### 1. Install
 
 ```bash
-pip install lanekeeper
+pip install --upgrade lanekeeper
+lanekeeper --version
 ```
+
+<details>
+<summary><strong>Windows: <code>lanekeeper</code> is "not recognized as the name of a cmdlet"</strong></summary>
+
+Microsoft Store Python installs the command into a folder that is not on your `PATH`,
+so the install succeeds and the command does not exist. Everything works through the
+module instead:
+
+```powershell
+python -m lanekeeper.cli --version
+```
+
+To type `lanekeeper` as this page does, either define it for the session
+
+```powershell
+function lanekeeper { python -m lanekeeper.cli @args }
+```
+
+or add the Scripts folder to your user `PATH`:
+
+```powershell
+"$env:LOCALAPPDATA\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\Scripts"
+```
+
+(the version numbers vary; the folder is the one `pip show -f lanekeeper` reports.)
+</details>
 
 ### 2. Let it read your tickets
 

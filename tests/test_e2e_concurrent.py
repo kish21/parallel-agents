@@ -49,7 +49,10 @@ class TestE2EConcurrent(unittest.TestCase):
                     seat="JR1",
                     command=None,
                     env=[],
-                    force=False,
+                    # force=True: this test puts many agents in one lane deliberately, to
+                    # prove ID and port allocation are race-free. One-lane-one-owner (#24)
+                    # is a separate rule with its own tests.
+                    force=True,
                 )
             )
 
@@ -81,7 +84,10 @@ class TestE2EConcurrent(unittest.TestCase):
                     seat="JR1",
                     command=None,
                     env=[],
-                    force=False,
+                    # force=True: this test puts many agents in one lane deliberately, to
+                    # prove ID and port allocation are race-free. One-lane-one-owner (#24)
+                    # is a separate rule with its own tests.
+                    force=True,
                 )
             )
 
@@ -112,7 +118,9 @@ class TestE2EConcurrent(unittest.TestCase):
         def spawn_one(c):
             name, lane, task, seat = c
             return cmd_spawn(
-                argparse.Namespace(name=name, lane=lane, task=task, seat=seat, command=None, env=[], force=False)
+                # force=True for the same reason: concurrency, not lane policy.
+                argparse.Namespace(name=name, lane=lane, task=task, seat=seat,
+                                   command=None, env=[], force=True)
             )
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
@@ -182,6 +190,10 @@ class TestE2EConcurrent(unittest.TestCase):
                     f"Task {i}",
                     "--seat",
                     "JR1",
+                    # Deliberate: ten agents across two lanes, to prove independent OS
+                    # processes allocate ids and ports without racing. One-lane-one-owner
+                    # (#24) is a separate rule with its own tests.
+                    "--force",
                 ],
                 cwd=str(self.root),
                 stdout=subprocess.PIPE,

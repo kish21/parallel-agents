@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.7] — 2026-09-05
+
+Three of the thirteen open issues — the two labelled `bug` that a real run reaches,
+and the documentation one the owner hit twenty seconds into his own test.
+
+### Fixed
+
+- **Two agents could own one lane, and both passed (#24).** Reproduced: spawn twice
+  into the same lane, `validate` says PASSED for both. They are free to edit the same
+  files, and the gate cannot tell them apart because both *are* inside the boundary —
+  which is precisely the collision this tool exists to prevent. A second live agent in
+  a lane is now refused, naming the occupant and how to free it. `--force` still allows
+  it, out loud, for the case where somebody means it.
+- **Editing lanes in `config.yaml` broke every spawn (#29).** Every message that says
+  "add the path to its lane" produces a lane the seat cards were written before, and
+  the next spawn failed with `Seat 'JR1' is not permitted in lane 'alpha'`, listing
+  lanes that no longer exist. A lane *no* card has heard of is a stale card: it is
+  reconciled and said aloud. A lane other cards do name is a real restriction on this
+  seat and still stands, now with the fix in the message.
+- **The README's install instruction silently failed on Microsoft Store Python (#27).**
+  `pip install lanekeeper` succeeds and `lanekeeper` then does not exist, because the
+  command lands in a folder that is not on `PATH`. The install section now says so, and
+  gives `python -m lanekeeper.cli` plus the PATH entry. Also `pip install --upgrade`,
+  since plain `pip install` leaves an older copy in place without a word.
+
+The concurrency tests pack many agents into two lanes on purpose, to prove ID and port
+allocation are race-free; they now pass `--force` and say why.
+
 ## [v0.7.6] — 2026-09-05
 
 Eight findings from the owner running the deep-test protocol on Windows, on a real
