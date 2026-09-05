@@ -328,6 +328,36 @@ and FEAT-03 both claim `src/domain/contracts.ts`, and `spawn --ticket 3` said so
 
 ---
 
+## Session of 2026-09-05: the deep-test protocol — v0.7.5
+
+The user asked for a thorough test, written from a new user's point of view. Grounding
+every expected output meant running every command against published 0.7.4 on the
+mini-issue-tracker stand-in, which turned up four things away from the gate:
+
+- `cleanup` without `--force` raised `EOFError` and printed a traceback when stdin had
+  nothing in it. Now caught; the message names `--force`. **The tty test was wrong:**
+  an answer piped in must still count (`test_gate_holes.TestCleanupHonoursTheAnswer`),
+  so the fix is the `except EOFError`, never an `isatty` guard.
+- Every worktree is "dirty" the moment it is created, because `spawn` writes `.lane`
+  and `.env` into it — so `cleanup` always asked. `has_uncommitted_changes` now ignores
+  bookkeeping files, and `remove_worktree` always passes `--force` to git past that
+  guard (git refuses to remove a worktree over its own untracked files).
+- `validate` and the missing-cards message recommended `lanekeeper init --force`, which
+  would replace ticket-derived lanes with technology layers.
+- `diff` counted bookkeeping files then hid them, so the total disagreed with the list.
+
+Tests: `tests/test_new_user_findings.py` (5 of 6 fail on the released code).
+
+**The deep-test protocol** is a second Claude artifact, separate from the 15-minute
+tester sheet: 32 steps, ~1 hour, including a "try to slip something past it" part
+(rename out of a lane, delete outside it, edit the policy from an ordinary lane, an
+undeclared lane, an undiffable base). Both artifacts live outside the repo.
+
+**Still not done:** the live board check; any outside tester; #39 (dependency vs
+collision) remains deliberately frozen.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use

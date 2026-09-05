@@ -239,9 +239,10 @@ class Validator:
         if orphaned:
             errors.append(
                 f"No declared lane allows {len(orphaned)} of these paths (e.g. {orphaned[0]}). "
-                f"Your lanes may not match this project's layout — check the 'lanes' section of "
-                f"{paths.display_config_path()}, or re-run 'lanekeeper init --force' to "
-                f"regenerate them from the repository's actual structure."
+                f"Either this change belongs in a lane nobody has declared yet, or this "
+                f"agent's ticket needed a file it did not name — add the path to its lane in "
+                f"the 'lanes' section of {paths.display_config_path()}, as the person who "
+                f"owns the policy."
             )
 
         # 2. Quality commands.

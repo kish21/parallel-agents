@@ -10,6 +10,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.5] — 2026-09-05
+
+Found while writing a thorough, first-time-user test protocol and running every
+command in it against published 0.7.4. None of these is a hole in the gate; each is
+the tool telling a new user something false or unhelpful.
+
+### Fixed
+
+- **`cleanup` crashed with a traceback when nothing could answer its question.** Run
+  from a script or a pipe with no input, `input()` raised `EOFError` and the user got
+  a stack trace. It now aborts, keeps the work, and names `--force`. An answer that
+  *is* piped in still counts, as before.
+- **A worktree holding only lanekeeper's own files counted as dirty.** `.lane` and
+  `.env` are written by `spawn`, so `cleanup` demanded `--force` for an agent that had
+  never run — which teaches people to pass `--force` always, exactly the habit the
+  question exists to prevent. `has_uncommitted_changes` now ignores those two files,
+  and the git removal past that guard is forced, since git will not remove a worktree
+  over its own untracked files.
+- **Two messages recommended `lanekeeper init --force`**, which replaces a policy
+  built from tickets with technology-layer lanes. `validate` now says to add the path
+  to the lane that needs it; the missing-cards message says to restore the cards from
+  git or drop `capability_gates`, and says what `init --force` would cost.
+- **`lanekeeper diff` printed a file count higher than the list below it**, because
+  bookkeeping files were counted and then hidden.
+
 ## [v0.7.4] — 2026-09-02
 
 Everything here was found by running the tester sheet, start to finish, on a fresh
