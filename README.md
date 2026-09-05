@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.5-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.6-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -116,7 +116,7 @@ Point the agent at it: *"Read `.lane` before you start. Stay inside `ALLOW`."*
 ### 5. Put the gate on every pull request
 
 ```bash
-lanekeeper check --write-workflow    # writes .github/workflows/lanekeeper-gate.yml
+lanekeeper install-gate    # writes .github/workflows/lanekeeper-gate.yml
 ```
 
 Commit it. From then on every PR needs exactly one `lane: <name>` label, and the gate
@@ -645,7 +645,8 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a confirmed `--propose`); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
-| **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. `--write-workflow` installs it in GitHub Actions. |
+| **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. |
+| **`lanekeeper install-gate`** | Writes the GitHub Action that runs `check` on every pull request. Once per repository. |
 | **`lanekeeper open`** | Opens an agent's worktree in the configured editor. |
 | **`lanekeeper board`** | Creates the GitHub project board (Lane, Owner, Seat, labels, milestones) from the configuration; `--show` reads the cards back. |
 | **`lanekeeper divide`** | Proposes how the work divides into a draft; `--confirm` re-checks your edits and writes the lanes into the policy. |

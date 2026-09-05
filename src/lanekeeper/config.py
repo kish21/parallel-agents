@@ -785,7 +785,10 @@ def load_config(root_dir: Optional[Path] = None) -> Config:
     cfg_file = paths.config_path(root)
     if not cfg_file.exists():
         raise FileNotFoundError(
-            f"No lanekeeper configuration found at {cfg_file}. Run 'lanekeeper init' first."
+            f"No lanekeeper configuration found at {cfg_file}. Hand a ticket to an "
+            f"agent and one is written for you: 'lanekeeper spawn --ticket <number>'. "
+            f"('lanekeeper start' walks through a whole backlog; 'lanekeeper init' is "
+            f"the old escape hatch and writes technology-layer lanes.)"
         )
     with open(cfg_file, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}

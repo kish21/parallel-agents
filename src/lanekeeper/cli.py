@@ -675,6 +675,9 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"❌ Failed to reserve agent resources: {e}", file=sys.stderr)
         return 1
 
+    first_worktree = not any(
+        a.id != agent_id for a in state_mgr.list_agents())
+
     # Phase 2: create the worktree under the dedicated git lock, then do the rest
     # unlocked. Concurrent `git worktree add` against one repository races on refs and the
     # index, so it must be serialised — but only against other git operations, not against
@@ -718,11 +721,21 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print()
         print(ticket_mod.next_steps(ticket_lane, (root / check_mod.WORKFLOW_PATH).exists(),
                                     base=worktree_mgr.get_default_branch()))
+    if first_worktree:
+        # A whole second copy of the project appearing in the sidebar reads as a fault
+        # to somebody who has never used git worktrees. Say what it is, once.
+        print(f"\n  ℹ️  {config.worktree_dir}/ now holds a separate checkout per agent. Git "
+              f"ignores it, and\n      'lanekeeper cleanup {agent_id}' removes it. To keep "
+              f"it outside the project, set\n      'worktree_dir: ../lk-worktrees' in "
+              f"{paths.display_config_path()}.")
+    if ticket_lane is not None:
+        print()
+        print(ticket_mod.how_to_work(ticket_lane, resolved_path, agent_id, root=root))
     if getattr(args, "open", False):
         # The agent exists whether or not the editor opens; a missing editor is reported
         # and the spawn still succeeded.
         return _open_desk(config, resolved_path, agent_id)
-    print(f"To open:     lanekeeper open {agent_id}")
+    print(f"\nTo open:     lanekeeper open {agent_id}")
     return 0
 
 
@@ -847,6 +860,17 @@ def cmd_open(args: argparse.Namespace) -> int:
         print(f"❌ Worktree {worktree} does not exist. Run 'lanekeeper doctor'.", file=sys.stderr)
         return 1
     return _open_desk(config, worktree, agent.id)
+
+
+def cmd_install_gate(args: argparse.Namespace) -> int:
+    """`lanekeeper install-gate` — what `check --write-workflow` always did."""
+    args.write_workflow = True
+    args.lane = None
+    args.labels_json = None
+    args.base = "main"
+    args.head = "HEAD"
+    args.working_tree = False
+    return cmd_check(args)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -1407,6 +1431,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_spawn.add_argument("--open", action="store_true",
                          help="Open the new worktree in the configured editor")
     p_spawn.set_defaults(func=cmd_spawn)
+
+    # `check --write-workflow` writes a file and checks nothing, which is not a name
+    # anybody guesses. The flag stays for the people already using it; this is what
+    # the documentation now says.
+    p_gate = subparsers.add_parser(
+        "install-gate",
+        help="Install the GitHub Action that runs the boundary check on every pull request")
+    p_gate.add_argument("--label-prefix", default=check_mod.DEFAULT_LABEL_PREFIX,
+                        help="Label prefix the workflow reads the lane from")
+    p_gate.add_argument("--force", action="store_true",
+                        help="Replace an existing workflow file")
+    p_gate.set_defaults(func=cmd_install_gate)
 
     # open
     p_open = subparsers.add_parser("open", help="Open an agent's worktree in the configured editor")
