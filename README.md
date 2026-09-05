@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.7-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.7.10-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -13,6 +13,16 @@ consulted where the safety promise is made.
 
 It is built to pair with [product-playbook](https://github.com/kish21/product-playbook),
 which writes the tickets. Product-playbook writes the work down; lanekeeper divides it up.
+
+> ### 👉 New here? Read **[Getting started](docs/getting-started.md)** instead of this page.
+>
+> It answers the questions this page assumes you have already settled: whether
+> lanekeeper is for you at all, what you need installed, what to type first, what every
+> message means, what to do when the gate says no, and how to remove it again. Every
+> command on it is shown with its real output.
+>
+> The rest of *this* page is the reference: the lane file schema, capability gates,
+> ports, agent lifecycle, recovery.
 
 ---
 
@@ -833,6 +843,8 @@ run.
 
 | Document | Description |
 | :--- | :--- |
+| **[Getting started](docs/getting-started.md)** | **Start here if you are new.** Whether lanekeeper suits your situation, what to install, your first agent step by step with real output, what every refusal means, troubleshooting, and how to remove it. |
+| **[The generated CODEOWNERS](docs/codeowners.md)** | Why it is ordered the way it is, what it cannot express, and why it does not replace the gate. |
 | **[The lane file](docs/start-step2-divide.md)** | How `start` reads the tickets, proposes the split, and what `--confirm` writes. |
 | **[The pre-flight](docs/start-step1-intake.md)** | What `start` checks before it divides anything. |
 | **[The ticket form](docs/ticket-template.md)** | Why Allowed File Paths is the one required field. |

@@ -10,6 +10,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.10] — 2026-09-05
+
+Documentation only. No behaviour changed.
+
+### Added
+
+- **[`docs/getting-started.md`](docs/getting-started.md)** — the page for somebody who
+  has never run lanekeeper and wants to know whether it is worth their time before
+  they know any of its words. It answers, in order: is this for you (with the cases
+  where the honest answer is no), the five terms everything else uses, what you need
+  installed and how to check each one, install including the Microsoft Store Python
+  trap, your first agent in six steps, which command to run for each thing you might
+  want, all four refusals the gate can produce and what to do about each, tickets that
+  name no files, two agents at once and the overlap warning, making GitHub enforce it,
+  finishing with an agent, removing lanekeeper entirely, and a troubleshooting table of
+  every message a first run is likely to hit.
+
+  Every command on it was run against published 0.7.9 on a real project and its output
+  pasted verbatim — including the messages that look like faults and are not: the
+  missing-configuration error that is really "run this first", the worktree appearing
+  in the editor sidebar, and the first agent's "this checkout has no policy of its own".
+
+  It also states the limits out loud: two agents in one lane cannot be told apart, a
+  lane is only as good as its ticket, reading is unrestricted, and the two features
+  never yet observed against live GitHub (`board`, and `codeowners` routing a real
+  pull request).
+
+### Changed
+
+- The README now opens by pointing a new reader at that guide and says plainly that
+  the rest of it is reference. Its version badge said v0.7.7 three releases running;
+  it is now correct.
+
 ## [v0.7.9] — 2026-09-05
 
 ### Added

@@ -530,6 +530,40 @@ live check as `lanekeeper board`.
 
 ---
 
+## Session of 2026-09-05 (sixth): the first-time user guide — v0.7.10
+
+Documentation only, and the brief was specific: a page an end user can read to decide
+whether to use lanekeeper and then use it, **with no clarification left to ask for**.
+[`docs/getting-started.md`](docs/getting-started.md), 16 sections.
+
+**Every command on it was run against published 0.7.9** on a copy of the
+mini-issue-tracker checkout in the scratchpad, with the `gh` stand-in, and the output
+pasted verbatim — including a deliberate deny-pattern edit to produce the `denied to
+lane` refusal, a ticket with no file list to produce that refusal, and a real `uninit`
+to capture the plan-and-confirm text. Nothing on the page is invented output.
+
+Three things the writing itself turned up, all fixed on the page rather than papered
+over:
+
+- The page has to say **when not to use it** (one agent; separate repositories; wanting
+  the tool to write or assign the work) or the honest cases arrive as disappointment.
+- The `check` message the *first* agent always sees ("this checkout has no policy of its
+  own") looks like a fault and is not, because that worktree predates the policy commit.
+  `git merge main` inside it clears it; verified, and now documented as expected.
+- A first draft told the reader never to run `init`, and §9 then told a reader with no
+  ticket tracker to run exactly that. Contradiction fixed both ways: `init` is the entry
+  point without a tracker, with the fallback-to-layers line it prints called out as the
+  thing to read and rewrite.
+
+Also: the README opens by pointing new readers at the guide and says the rest of it is
+reference; its version badge had said v0.7.7 for three releases and is now correct.
+
+**Kept honest on the page:** two agents in one lane cannot be told apart; a lane is only
+as good as its ticket; reading is unrestricted; and neither `board` nor `codeowners` has
+been observed against live GitHub.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use
