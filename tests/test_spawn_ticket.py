@@ -113,7 +113,7 @@ class TestTheTicketIsTheBoundary(TicketSpawnTestCase):
         lane_file = self.root / ".lanekeeper" / "worktrees" / "agent-001" / ".lane"
         self.assertIn("src/pages/checkout/**", lane_file.read_text(encoding="utf-8"))
         self.assertIn("label it 'lane: feat-02'", out)
-        self.assertIn("check --write-workflow", out)
+        self.assertIn("lanekeeper install-gate", out)
 
     def test_a_ticket_without_a_tag_is_named_by_its_number(self):
         self.write_policy()

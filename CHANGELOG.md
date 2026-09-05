@@ -10,6 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.6] — 2026-09-05
+
+Eight findings from the owner running the deep-test protocol on Windows, on a real
+project, against published 0.7.5. Not one is a hole in the gate. Every one is a
+sentence the tool said, or failed to say, to somebody using it for the first time.
+
+### Added
+
+- **`lanekeeper install-gate`.** `check --write-workflow` writes a file and checks
+  nothing; nobody guesses that name, and the person who wrote it had to explain it.
+  The flag still works.
+- **`spawn --ticket` now says how to do the work.** It printed the policy, the label
+  and the gate — all bookkeeping — and never said "open a terminal here and start
+  your coding agent". A first-time user reached a prepared worktree and stopped. It
+  now prints the three things to do, including a ready-to-paste prompt carrying the
+  task and every allowed file, so the agent is *told* its boundary rather than left
+  to find `.lane` by luck.
+- **A line explaining the worktree folder** the first time one appears, since a
+  second copy of the project in the sidebar reads as a fault: git ignores it,
+  `cleanup` removes it, and `worktree_dir` moves it out of the project.
+
+### Fixed
+
+- **"Run 'lanekeeper init' first"** was the first advice a new user got, from both
+  `status` and `doctor`. `init` writes technology-layer lanes — the path this tool
+  argues against. Both now name `spawn --ticket`, and say what `init` costs.
+- **`doctor` offered `lanekeeper repair`** for a missing configuration. `repair`
+  reconciles agents and ports, both of which need a configuration to load, so it
+  could never have helped. A missing config is no longer marked repairable.
+- **The "commit the policy" warning blamed the agent.** Verified otherwise: an
+  uncommitted policy is not visible inside the agent's worktree at all, so the agent
+  cannot sweep it up. The person running `git add -A` in the main checkout can. The
+  wording now says so, and a test pins the git behaviour.
+- Worktree paths in that output are printed relative to the repository.
+
 ## [v0.7.5] — 2026-09-05
 
 Found while writing a thorough, first-time-user test protocol and running every

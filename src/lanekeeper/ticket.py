@@ -194,20 +194,74 @@ def describe(lane: TicketLane, created: bool, widened: Sequence[str]) -> str:
     return "\n".join(lines)
 
 
+def agent_prompt(lane: TicketLane) -> str:
+    """A prompt to paste into whatever coding agent works in this worktree.
+
+    The boundary is in `.lane`, but nothing makes an agent read it: the first real
+    user watched one get the scope right and could not tell whether it would next
+    time. A prompt the person pastes is deterministic in a way that hoping is not.
+    """
+    files = ", ".join(lane.paths)
+    return (f"Implement {lane.issue.title or ('issue #' + str(lane.issue.ref))} "
+            f"(#{lane.issue.ref}). You may only create or modify these files: {files}. "
+            f"If the task needs a file that is not in that list, stop and say so instead "
+            f"of editing it — a change outside the list is rejected before it can merge.")
+
+
 def next_steps(lane: TicketLane, gate_workflow_exists: bool, base: str = "main") -> str:
     lines = []
     if not gate_workflow_exists:
-        lines.append("The gate is not installed yet: run 'lanekeeper check --write-workflow' "
-                     "once and commit the workflow.")
+        lines.append("The gate is not installed yet. It is one file — the GitHub Action "
+                     "that runs this check on every pull request:\n"
+                     "      lanekeeper install-gate")
     if lane.policy_uncommitted:
         lines.append(
-            f"Commit the policy on '{base}' before the agent commits anything. Until you "
-            f"do, its first 'git add -A' sweeps the policy into the agent's branch, and "
-            f"the gate denies that — a policy change is its own lane:\n"
+            f"Commit the policy here, on '{base}', before you commit anything else. CI "
+            f"can only enforce a policy that is in the repository, and an uncommitted "
+            f"one gets swept into your next 'git add -A' by accident, where the gate "
+            f"denies it — a policy change is its own lane:\n"
             f"      git add .lanekeeper .gitignore && git commit -m 'Add the lane policy'")
     lines.append(f"When the agent opens its pull request, label it 'lane: {lane.name}'. "
                  f"The gate fails the change if any file is outside the lane.")
     return "\n".join(f"  • {line}" for line in lines)
+
+
+def _short(worktree: Path, root: Optional[Path] = None) -> str:
+    """The worktree path as the person would type it — relative when it is inside the
+    repository, which is the default. An absolute Windows path printed three times is
+    most of what made this section look like a wall of text."""
+    try:
+        return str(worktree.relative_to(root or Path.cwd())).replace("\\", "/")
+    except (ValueError, OSError):
+        return str(worktree)
+
+
+def how_to_work(lane: TicketLane, worktree: Path, agent_id: str,
+                root: Optional[Path] = None) -> str:
+    """What to actually do next, which is where the first real user got stuck.
+
+    Everything else `spawn` prints is bookkeeping — the policy, the label, the gate.
+    None of it says "now do the work", and a person looking at a freshly opened
+    editor has no idea that the tool has finished its part.
+    """
+    where = _short(worktree, root)
+    return "\n".join([
+        "▶ Now do the work. Lanekeeper has prepared the desk; it does not write code.",
+        "",
+        f"  1. In {where} (the editor window that just opened is already",
+        "     there), start your coding agent — claude, cursor, whatever you use.",
+        "",
+        "  2. Give it the task and its boundary. This prompt carries both:",
+        "",
+        f"       {agent_prompt(lane)}",
+        "",
+        "  3. When it is done, from that same folder:",
+        "",
+        f"       lanekeeper check --lane {lane.name} --base main --working-tree",
+        "",
+        "     Green means every changed file is inside the boundary; red names the one",
+        f"     that is not. The same boundary is in {where}/.lane.",
+    ])
 
 
 def confirm_proposal(ref: str, paths: Sequence[str], answer: Optional[str]) -> bool:

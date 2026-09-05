@@ -358,6 +358,45 @@ collision) remains deliberately frozen.
 
 ---
 
+## Session of 2026-09-05 (second): the owner ran the protocol — v0.7.6
+
+The owner ran the deep-test protocol himself, on Windows, on a real clone of
+mini-issue-tracker, against published 0.7.5. **The gate was never wrong.** Eight
+findings, all about what the tool says:
+
+1–2. `status` and `doctor` both opened with "Run 'lanekeeper init' first" — the path
+that writes technology-layer lanes. Fixed in `config.load_config`'s error, which is
+where both got it. 3. `doctor` then offered `repair`, which cannot create a config
+(`DiagnosticCheck(repairable=False)`). 4. The worktree folder appearing in the VS Code
+sidebar reads as a fault; one line now says what it is and how to move it
+(`worktree_dir`). 5. **The important one:** nothing said *how to do the work*. The
+output was all bookkeeping — policy, label, gate — and a first-time user reached a
+prepared worktree and stopped. `ticket.how_to_work` and `ticket.agent_prompt` now
+print the three actions plus a paste-ready prompt carrying task and file list.
+6. The agent read `.lane` by luck, not instruction — the prompt fixes that
+deterministically. **Writing a `CLAUDE.md` into the worktree was tried and rejected:**
+git's per-worktree `info/exclude` does not apply (the common dir's does), so the file
+would either be committed and denied by the gate, or exempted as bookkeeping — which
+would let an agent silently rewrite the project's own CLAUDE.md. 7. The "commit the
+policy" warning I wrote in 0.7.4 **blamed the agent, and was wrong**: an uncommitted
+policy is not visible in the worktree at all (pinned by a test). The hazard is the
+person's own `git add -A` in the main checkout. 8. `check --write-workflow` writes a
+file and checks nothing → **`lanekeeper install-gate`**, flag kept.
+
+Tests: `tests/test_first_run_findings.py` (10 of 12 fail on 0.7.5). Two older tests
+asserted the wording that changed and were updated.
+
+**Also agreed, not built:** an opt-in `commands:` section (`frontend`, `backend`,
+`auto`) proposed from `package.json` scripts and any Python manifest, started by
+`open --run` on the agent's own ports. Default off — five agents auto-starting five
+dev servers unasked is how a tool gets uninstalled.
+
+**Windows note for the protocol:** on Windows Store Python, `pip install lanekeeper`
+succeeds and `lanekeeper` is then not on PATH. `python -m lanekeeper.cli` works, or
+add the user Scripts directory to PATH.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use

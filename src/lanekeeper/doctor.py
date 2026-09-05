@@ -92,6 +92,10 @@ class Doctor:
                     name="Configuration",
                     passed=False,
                     message=f"Configuration error: {e}",
+                    # `repair` reconciles agent state and ports, both of which need a
+                    # configuration to load. Offering it here sent a first-time user to
+                    # a command that cannot create the very file that is missing.
+                    repairable=False,
                 )
             )
             return report

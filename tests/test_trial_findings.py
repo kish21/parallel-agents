@@ -128,7 +128,7 @@ class TestTheUncommittedPolicyIsCalledOut(RepoTestCase):
             name="feat-02", paths=("src/services/**",), source=ticket_mod.Source.TICKET,
             issue=TrackedIssue("2", "t"), policy_uncommitted=True)
         text = ticket_mod.next_steps(lane, gate_workflow_exists=True, base="main")
-        self.assertIn("Commit the policy on 'main'", text)
+        self.assertIn("Commit the policy here, on 'main'", text)
         self.assertIn("git add .lanekeeper", text)
         self.assertLess(text.index("Commit the policy"), text.index("label it"))
 
