@@ -114,7 +114,7 @@ def check_files(config: Config, lane_name: str, files: List[str]) -> LaneValidat
     if lane_name == POLICY_LANE:
         return _check_policy_change(files)
     lane = config.get_lane(lane_name)
-    return LaneEngine.validate_files(files, lane)
+    return LaneEngine.validate_files(files, lane, LaneEngine.shared_lanes(config))
 
 
 def _check_policy_change(files: List[str]) -> LaneValidationResult:
@@ -176,6 +176,11 @@ def check_checkout(
         elif v.reason == "denied":
             errors.append(f"{v.filepath}: denied to lane '{lane_name}' "
                           f"(matched '{v.matched_pattern}').")
+        elif v.reason == "shared":
+            errors.append(
+                f"{v.filepath}: shared code, in the '{v.shared_lane}' zone that belongs "
+                f"to no lane on purpose. A change here affects every lane, so it is "
+                f"raised and decided, not made inside this one.")
         elif lane_name == POLICY_LANE:
             errors.append(f"{v.filepath}: a policy change may touch only the policy files "
                           f"({', '.join(policy_lane_paths())}).")

@@ -97,6 +97,21 @@ class WorktreeManager:
         except Exception:
             return False
 
+    def repo_toplevel(self) -> Optional[Path]:
+        """The root of the repository this directory sits in, or None if there is none.
+
+        `--repo` points at a directory somebody typed. Lanekeeper writes its home beside
+        the repository root, so a subdirectory has to be named as one rather than
+        quietly initialising a second, half-working setup one level down.
+        """
+        try:
+            res = self._run_git(["rev-parse", "--show-toplevel"], check=False)
+        except GitError:
+            return None
+        if res.returncode != 0 or not res.stdout.strip():
+            return None
+        return Path(res.stdout.strip())
+
     def get_default_branch(self) -> str:
         try:
             res = self._run_git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], check=False)
@@ -125,6 +140,20 @@ class WorktreeManager:
         task_slug = self.slugify(task)
         clean_prefix = prefix.rstrip("/") + "/"
         return f"{clean_prefix}{agent_id}/{task_slug}"
+
+    def list_branches(self, prefix: str = "") -> List[str]:
+        """Local branch names, optionally only those starting with `prefix`.
+
+        `for-each-ref` rather than `branch --list`: it prints one plain name per line
+        with no decoration, so the branch that happens to be checked out does not
+        arrive with an asterisk on the front.
+        """
+        res = self._run_git(
+            ["for-each-ref", "--format=%(refname:short)", "refs/heads/"], check=False)
+        if res.returncode != 0:
+            return []
+        names = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        return [n for n in names if n.startswith(prefix)] if prefix else names
 
     def branch_exists(self, branch_name: str) -> bool:
         res = self._run_git(["show-ref", "--verify", f"refs/heads/{branch_name}"], check=False)

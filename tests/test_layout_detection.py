@@ -136,12 +136,24 @@ class TestDetectionSpecifics(unittest.TestCase):
 
 class TestInitUsesDetection(unittest.TestCase):
     def test_init_adopts_detected_lanes_and_reports_coverage(self):
+        # `--layers` since #23: without it `init` reads the packages of a monorepo as
+        # feature slices, which is the point of that issue. The layer detector is still
+        # what this test is about, and it is still what a repository with no repeated
+        # feature name falls back to.
+        root = make_repo(LAYOUTS["monorepo"])
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        res = run_cli(["init", "--name", "proj", "--layers"], root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("Detected", res.stdout)
+        self.assertIn("100%", res.stdout)
+
+    def test_init_prefers_the_features_a_monorepo_names(self):
         root = make_repo(LAYOUTS["monorepo"])
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         res = run_cli(["init", "--name", "proj"], root)
         self.assertEqual(res.returncode, 0, output_of(res))
-        self.assertIn("Detected", res.stdout)
-        self.assertIn("100%", res.stdout)
+        self.assertIn("feature slices", res.stdout, output_of(res))
+        self.assertIn("Owned by no lane", res.stdout, output_of(res))
 
     def test_generic_flag_opts_out_and_warns_about_poor_coverage(self):
         root = make_repo(LAYOUTS["python-src"])

@@ -276,6 +276,34 @@ checkout agent        search agent          catalog agent
 
 The goal is not to isolate every single file — it is that **one ticket lands in one lane.**
 
+### The shared middle
+
+A feature split is clean where the code is separable, and part of a real repository is
+not: the store, the shared types, the page files every feature has to touch. That middle
+is where parallel agents actually collide — the feature directories were never the
+problem — and under a feature split it is not a defect to tidy away. It is permanent.
+
+So a lane may be declared **`shared: true`**: a lane nobody is spawned into.
+
+```yaml
+lanes:
+  checkout:
+    allow:
+      - frontend/src/components/checkout/**
+  shared-ui:
+    shared: true            # owned by nobody, on purpose
+    allow:
+      - frontend/src/store/**
+      - frontend/src/types/**
+```
+
+`spawn` refuses that lane by name. The gate checks it **before** any lane's own `allow`,
+because two feature lanes will often both list the tree the shared store sits in, and a
+zone that only applied where nothing else claimed the file would be silent in exactly the
+case it exists for. A change that reaches it fails with *this is shared code, raise it*,
+not with *this is outside your lane* — a different instruction, and the one the agent
+can act on.
+
 ---
 
 ## The lane file
@@ -667,7 +695,7 @@ swapping vendors edits one field and changes nothing else.
 | :--- | :--- |
 | **`lanekeeper start`** | Guided setup. Checks that the work is written down and covers the product before anything else runs. |
 | **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
-| **`lanekeeper init`** | The escape hatch: writes a policy with lanes detected from the directory layout (technology layers, not features). Use `start` unless you already know your lanes. |
+| **`lanekeeper init`** | The escape hatch: writes a policy with lanes read from the directory layout — feature slices where the tree repeats a feature name on both sides of the stack, technology layers (with `--layers`, or as the fallback) where it does not. Use `start` unless you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
 | **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a confirmed `--propose`); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
@@ -684,7 +712,12 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper restart`** | Restarts an agent in its worktree. |
 | **`lanekeeper repair`** | Repairs stale states and releases orphaned ports. |
 | **`lanekeeper declare`** | Generates the PR gate declaration from recorded state. |
-| **`lanekeeper cleanup`** | Safely removes worktrees and releases port allocations. |
+| **`lanekeeper cleanup`** | Safely removes worktrees and releases port allocations. Deletes the agent's branch when git agrees it is fully merged, and keeps it — saying so — when it is not. |
+| **`lanekeeper uninit`** | Takes lanekeeper back out of the repository: worktrees, merged agent branches, `.lanekeeper/`, the gate workflow and the managed `.gitignore` block. Shows the plan and asks first; never deletes an unmerged branch. |
+
+Every command accepts a global **`--repo <path>`** (short form `-C`, as in git) to run
+against a repository that is not the current directory. It has to be the repository root;
+a subdirectory is refused and the root is named.
 
 ---
 

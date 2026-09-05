@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 from .config import LaneConfig
 from . import paths
 
@@ -14,8 +14,13 @@ from . import paths
 @dataclass
 class LaneViolation:
     filepath: str
-    reason: str  # "denied", "not_allowed" or "policy"
+    reason: str  # "denied", "not_allowed", "policy" or "shared"
     matched_pattern: Optional[str] = None
+    #: For reason "shared": the lane that owns this file on nobody's behalf. Carried
+    #: separately from `matched_pattern` because the two answer different questions —
+    #: which pattern matched, and whose zone this is — and a message that needs the
+    #: second one should not have to guess it from the first.
+    shared_lane: Optional[str] = None
 
 
 @dataclass
@@ -119,13 +124,39 @@ class LaneEngine:
         return False
 
     @classmethod
-    def check_file(cls, filepath: str | Path, lane: LaneConfig) -> Optional[LaneViolation]:
+    def shared_lanes(cls, config) -> Tuple[LaneConfig, ...]:
+        """The lanes declared `shared: true`, in declaration order."""
+        return tuple(lane for lane in config.lanes.values() if lane.shared)
+
+    @classmethod
+    def claims(cls, filepath: str, lane: LaneConfig) -> bool:
+        """Whether this lane owns this path, after its own carve-outs."""
+        if any(cls.match_glob(filepath, d) for d in lane.deny):
+            return False
+        return any(cls.match_glob(filepath, a) for a in lane.allow)
+
+    @classmethod
+    def check_file(cls, filepath: str | Path, lane: LaneConfig,
+                   shared: Sequence[LaneConfig] = ()) -> Optional[LaneViolation]:
         path_str = cls.normalize_path(filepath)
 
         # 0. The policy is not subject to the policy: it is denied to every lane, before
         #    an `allow` as wide as `**` gets a say.
         if cls.is_policy(path_str):
             return LaneViolation(filepath=path_str, reason="policy", matched_pattern=None)
+
+        # 0b. A shared zone belongs to nobody, and that beats this lane's own `allow`.
+        #     Two feature lanes will often both list the directory holding the shared
+        #     store or the shared types — that overlap is exactly where parallel agents
+        #     collide — so a shared zone that only applied when no lane claimed the file
+        #     would be silent in the one case it exists for. The lane that owns the zone
+        #     may change it: that is the escalated change, made deliberately.
+        for zone in shared:
+            if zone.name == lane.name:
+                continue
+            if cls.claims(path_str, zone):
+                return LaneViolation(filepath=path_str, reason="shared",
+                                     matched_pattern=None, shared_lane=zone.name)
 
         # 1. Check explicit Deny patterns first
         for deny_pat in lane.deny:
@@ -153,7 +184,8 @@ class LaneEngine:
         return None
 
     @classmethod
-    def validate_files(cls, files: List[str | Path], lane: LaneConfig) -> LaneValidationResult:
+    def validate_files(cls, files: List[str | Path], lane: LaneConfig,
+                       shared: Sequence[LaneConfig] = ()) -> LaneValidationResult:
         allowed: List[str] = []
         violations: List[LaneViolation] = []
 
@@ -162,7 +194,7 @@ class LaneEngine:
             if cls.is_bookkeeping(norm_f):
                 continue
 
-            violation = cls.check_file(norm_f, lane)
+            violation = cls.check_file(norm_f, lane, shared)
             if violation:
                 violations.append(violation)
             else:

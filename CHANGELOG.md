@@ -10,6 +10,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.8] — 2026-09-05
+
+Four more of the open issues, in the order a real run reaches them. The gate is
+unchanged in what it permits; it now has one more thing it can say.
+
+### Added
+
+- **A lane may be shared (#25).** A feature split is clean where a repository is
+  separable, and part of a real one is not: the store, the shared types, the page files
+  every feature has to touch. That middle is where parallel agents actually collide, and
+  under a feature split it is not a defect to tidy away — it is permanent. A lane
+  declared `shared: true` is one nobody is spawned into: `spawn` refuses it by name, and
+  a change reaching its paths fails with *this is shared code, raise it* rather than
+  *this is outside your lane*. The check runs **before** the acting lane's own `allow`,
+  because two feature lanes will often both list the tree the shared store sits in, and
+  a zone that only applied where nothing else claimed the file would be silent in
+  exactly the case it exists for. The lane that owns the zone may still change it: that
+  is the deliberate, escalated change.
+- **`lanekeeper uninit` (#26).** Removes the worktrees, the fully merged agent branches,
+  `.lanekeeper/`, the generated `lanekeeper-*.yml` workflows and the managed `.gitignore`
+  block — showing the plan and asking first. An unmerged branch is never deleted, not
+  even with `--force`: `--force` answers "are you sure", it does not decide that
+  somebody's commits do not matter. Trying the tool on a repository you care about had
+  been a one-way door, which is a bad property for a tool that has to be tried on one.
+- **A global `--repo <path>` / `-C` (#28).** Accepted before or after the subcommand, and
+  handled once — every command derives its work from the current directory, so the whole
+  of the flag is one validated `chdir`. A path that is not a git repository is refused,
+  and a subdirectory of one is refused with its root named rather than quietly
+  initialising a second, half-working setup one level down. `board --repo OWNER/NAME`
+  predates it and keeps its own meaning.
+
+### Changed
+
+- **`init` splits by feature first (#23).** It read `layout.ROLE_BY_DIR_NAME`, which
+  answers "what kind of code is this" and returns `backend` — the split that turns an
+  ordinary ticket (service, schema, route, page, test) into a four-way escalation
+  against four lanes. It now reads the feature slices the tree already names
+  (`divide.codebase`, the same reading `divide` uses) and falls back to technology
+  layers only when fewer than two are found. `--layers` forces the old split, and the
+  fallback still says out loud that layers are what it wrote. Where a feature split
+  leaves files owned by nobody, `init` names them and points at `shared: true`.
+- `WorktreeManager` gained `list_branches` and `repo_toplevel`, the two readings
+  `uninit` and `--repo` needed. `cleanup`'s branch deletion is unchanged: it already
+  refused to delete an unmerged branch, and `uninit` reuses that refusal rather than
+  inventing a second rule about whose commits matter.
+
 ## [v0.7.7] — 2026-09-05
 
 Three of the thirteen open issues — the two labelled `bug` that a real run reaches,

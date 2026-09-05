@@ -215,7 +215,8 @@ class Validator:
             errors.append(
                 f"Could not read this agent's changes, so nothing was checked: {e}")
             return failed()
-        lane_result = LaneEngine.validate_files(changed_files, lane_config)
+        lane_result = LaneEngine.validate_files(
+            changed_files, lane_config, LaneEngine.shared_lanes(self.config))
 
         # A file that no declared lane would accept is a symptom of a lane configuration
         # that does not describe this repository — not of the agent doing something wrong.
@@ -233,6 +234,12 @@ class Validator:
             elif v.reason == "denied":
                 errors.append(
                     f"Forbidden file modified (matched deny pattern '{v.matched_pattern}'): {v.filepath}")
+            elif v.reason == "shared":
+                errors.append(
+                    f"Shared code modified: {v.filepath} is in the '{v.shared_lane}' zone, "
+                    f"which belongs to no lane on purpose. Every lane depends on it, so "
+                    f"the change is raised with whoever owns the policy and made "
+                    f"deliberately — it is not this agent's to make.")
             else:
                 errors.append(
                     f"Out-of-lane file modified (not in allowed paths for lane '{agent.lane}'): {v.filepath}")
