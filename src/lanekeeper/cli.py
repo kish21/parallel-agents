@@ -26,8 +26,10 @@ from .capabilities import (
     default_cards,
     save_card,
 )
-from .config import Config, LaneConfig, UnknownLaneError, load_config, save_config
+from .config import (Config, LaneConfig, UnknownLaneError, load_config,
+                     owner_list as config_owner_list, save_config)
 from . import check as check_mod
+from . import codeowners as codeowners_mod
 from . import board as board_mod
 from . import handoff
 from .desk import EditorNotFoundError, open_worktree
@@ -1220,6 +1222,133 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 2
 
 
+def cmd_codeowners(args: argparse.Namespace) -> int:
+    """Writes the lanes out as `.github/CODEOWNERS`. See codeowners.py and issue #42.
+
+    Generated from the same `config.yaml` the gate reads, deliberately: a CODEOWNERS
+    file generated from a second file nobody enforces would drift from the boundary it
+    claims to describe, which is worse than not having one.
+    """
+    root = Path.cwd()
+    try:
+        config = load_config(root)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+
+    if args.owner:
+        # The same rule the configuration file is held to, applied to the flag. A
+        # handle without its `@` is not an error GitHub reports: the line is ignored
+        # and the routing silently does not happen.
+        try:
+            owners = config_owner_list("--owner", list(args.owner))
+        except ValueError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            return 1
+    else:
+        owners = list(config.codeowners.default_owner)
+
+    try:
+        text, plan = codeowners_mod.desired_text(config, root, owners)
+    except codeowners_mod.MalformedBlock as e:
+        rel = config.codeowners.path
+        print(f"❌ {rel}: {e}.", file=sys.stderr)
+        print("   Nothing was written. Repair the markers by hand — the text around "
+              "them is yours,", file=sys.stderr)
+        print("   and guessing where the block ends would delete it.", file=sys.stderr)
+        return 1
+    target = codeowners_mod.target_path(config, root)
+    rel = target.relative_to(root).as_posix() if target.is_relative_to(root) else str(target)
+
+    if not plan.has_rules:
+        # Two different failures reach here and they need different advice: nobody to
+        # route to, or nothing translatable to route.
+        if plan.unowned_lanes:
+            print("❌ Nothing to write: no lane has an owner.", file=sys.stderr)
+            print("   CODEOWNERS routes reviews to people, and a line without an owner "
+                  "is a syntax error,", file=sys.stderr)
+            print("   so a lane nobody owns is left out rather than given somebody who "
+                  "never agreed to it.", file=sys.stderr)
+            print("   Give one: 'lanekeeper codeowners --owner @you', or set "
+                  "codeowners.default_owner", file=sys.stderr)
+            print(f"   in {paths.display_config_path(root)}, or an 'owner:' on "
+                  f"individual lanes.", file=sys.stderr)
+        else:
+            print("❌ Nothing to write: CODEOWNERS cannot express any of these lanes' "
+                  "paths.", file=sys.stderr)
+            for rule in plan.rules:
+                for pattern, reason in rule.skipped:
+                    print(f"   {rule.lane}: {pattern} — {reason}", file=sys.stderr)
+            print("   Rewrite those patterns, or route these paths by hand.",
+                  file=sys.stderr)
+        return 1
+
+    oversize = codeowners_mod.too_big(text)
+    if oversize is not None:
+        # Refused rather than written: over the limit GitHub stops loading the file
+        # entirely and says nothing, so writing it would silently switch off the
+        # routing this command exists to set up.
+        print(f"❌ The file would be {oversize / 1_000_000:.1f} MB, over GitHub's "
+              f"{codeowners_mod.MAX_BYTES / 1_000_000:.0f} MB limit.", file=sys.stderr)
+        print("   Above it GitHub stops loading CODEOWNERS entirely, without saying so, "
+              "so nothing was written.", file=sys.stderr)
+        print("   Fewer, wider patterns per lane is the fix.", file=sys.stderr)
+        return 1
+
+    if args.check:
+        current = target.read_text(encoding="utf-8") if target.exists() else ""
+        if current == text:
+            print(f"✅ {rel} matches the lanes.")
+            return 0
+        print(f"❌ {rel} does not match the lanes in "
+              f"{paths.display_config_path(root)}.", file=sys.stderr)
+        print("   Run 'lanekeeper codeowners' and commit the result.", file=sys.stderr)
+        return 1
+
+    existed = target.exists()
+    codeowners_mod.write(target, text)
+    print(f"{'♻️  Updated' if existed else '✅ Wrote'} {rel}")
+    for rule in plan.rules:
+        if rule.patterns:
+            owners_str = " ".join(rule.owners)
+            print(f"   {rule.lane}: {len(rule.patterns)} pattern(s) → {owners_str}")
+    if plan.unowned_lanes:
+        print(f"   No owner, so left out: {', '.join(plan.unowned_lanes)}")
+        print("   Give them an 'owner:' in config.yaml, or a --owner for everything.")
+    if plan.skipped_count:
+        print(f"   {plan.skipped_count} pattern(s) CODEOWNERS cannot express were "
+              f"skipped; the file says which and why:")
+        for rule in plan.rules:
+            for pattern, reason in rule.skipped:
+                print(f"      {rule.lane}: {pattern} — {reason}")
+    if plan.policy_unowned:
+        print("⚠️  Nobody owns the policy files, so no rule routes them and whichever "
+              "lane pattern")
+        print(f"   matches last owns {paths.display_config_path(root)} — the file that "
+              f"defines every lane.")
+        print("   Set codeowners.default_owner, or pass --owner, to route them "
+              "deliberately.")
+    overriding = codeowners_mod.rules_after_block(text)
+    if overriding:
+        print(f"⚠️  {len(overriding)} hand-written rule(s) sit below the managed block, "
+              f"so they override the lanes")
+        print(f"   for any path they match: {', '.join(overriding[:3])}"
+              + (" ..." if len(overriding) > 3 else ""))
+        print("   Move them above the block if the lanes should win.")
+    crowd = codeowners_mod.crowded(text)
+    if crowd is not None:
+        print(f"⚠️  {crowd / 1_000_000:.1f} MB — close to GitHub's "
+              f"{codeowners_mod.MAX_BYTES / 1_000_000:.0f} MB limit, above which the "
+              f"whole file is ignored.")
+    print()
+    print("   The last matching pattern wins in CODEOWNERS, so shared zones and the "
+          "policy are")
+    print("   written last on purpose. Turn on 'Require review from Code Owners' in "
+          "branch")
+    print("   protection for GitHub to enforce it.")
+    return 0
+
+
 def cmd_uninit(args: argparse.Namespace) -> int:
     """Takes lanekeeper back out of the repository. See uninit.py and issue #26.
 
@@ -1235,6 +1364,7 @@ def cmd_uninit(args: argparse.Namespace) -> int:
 
     agents: List[AgentState] = []
     branch_prefix = "parallel/"
+    codeowners_path = codeowners_mod.DEFAULT_PATH
     # Nothing is read until we know the directory is there. `StateManager` creates its
     # own state directory on construction, so asking it first would make `uninit`
     # create the very thing it then offers to remove — and report work to do on a
@@ -1247,13 +1377,15 @@ def cmd_uninit(args: argparse.Namespace) -> int:
             # broken setup, so a state file it cannot read must not stop it.
             agents = []
         try:
-            branch_prefix = load_config(root).git.branch_prefix
+            loaded = load_config(root)
+            branch_prefix = loaded.git.branch_prefix
+            codeowners_path = loaded.codeowners.path
         except Exception:
             pass
 
     plan = uninit_mod.build_plan(
         root, worktree_mgr, agents=agents, branch_prefix=branch_prefix,
-        gitignore_marker=GITIGNORE_BEGIN)
+        gitignore_marker=GITIGNORE_BEGIN, codeowners_path=codeowners_path)
 
     if plan.is_empty:
         print("ℹ️  Nothing to remove — this repository has no lanekeeper files in it.")
@@ -1679,6 +1811,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cln.add_argument("agent", help="Agent ID or name")
     p_cln.add_argument("--force", action="store_true", help="Force deletion even if uncommitted changes exist")
     p_cln.set_defaults(func=cmd_cleanup)
+
+    # codeowners
+    p_co = subparsers.add_parser(
+        "codeowners",
+        help="Write .github/CODEOWNERS from the lanes, so GitHub routes reviews the same way")
+    p_co.add_argument("--owner", action="append", metavar="@HANDLE",
+                      help="Owner for lanes that name none (repeatable)")
+    p_co.add_argument("--check", action="store_true",
+                      help="Do not write: fail if the file does not match the lanes")
+    p_co.set_defaults(func=cmd_codeowners)
 
     # uninit
     p_uni = subparsers.add_parser(

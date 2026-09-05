@@ -38,18 +38,36 @@ DEFAULT_LABEL_PREFIX = "lane:"
 WORKFLOW_PATH = Path(".github") / "workflows" / "lanekeeper-gate.yml"
 
 
-def policy_lane_paths() -> Tuple[str, ...]:
+def codeowners_path_default() -> str:
+    """Where CODEOWNERS goes when no configuration says otherwise.
+
+    Imported lazily inside the function: `codeowners` reads `config`, `config` is
+    imported here, and asking for it at module scope would close the circle.
+    """
+    from .codeowners import DEFAULT_PATH
+    return DEFAULT_PATH
+
+
+def policy_lane_paths(config: Optional[Config] = None) -> Tuple[str, ...]:
     """Everything a change under the `policy` lane may touch.
 
     The policy files themselves, plus the files that only ever change alongside them:
-    the ignore rules `init` writes, the human record `divide --confirm` writes, and
-    every workflow lanekeeper itself writes — the gate, and any other
+    the ignore rules `init` writes, the human record `divide --confirm` writes, the
+    CODEOWNERS file generated from the lanes, and every workflow lanekeeper writes — the gate, and any other
     `lanekeeper-*.yml` in the workflows directory. On the first real project, a second
     lanekeeper workflow added to the install pull request turned its own gate red,
     because only the gate's file was listed.
     """
     return tuple(paths.policy_paths()) + (
-        ".gitignore", "lanes.yaml", ".github/workflows/lanekeeper-*.yml")
+        ".gitignore", "lanes.yaml", ".github/workflows/lanekeeper-*.yml",
+        # Generated from the lanes, so it changes in the same pull request they do
+        # (#42). Read from the configuration rather than hardcoded: a project that
+        # keeps CODEOWNERS at the repository root would otherwise have its own policy
+        # pull request denied by the gate. Not in `paths.policy_paths()`, though —
+        # that is the set no lane may touch, and a repository whose own lane already
+        # owned `.github/**` should not have that taken away by a feature it has not
+        # turned on.
+        config.codeowners.path if config is not None else codeowners_path_default())
 
 
 class NoLaneError(ValueError):
@@ -112,16 +130,17 @@ def check_files(config: Config, lane_name: str, files: List[str]) -> LaneValidat
     claiming a lane that does not exist has no boundary, and no boundary is not a pass.
     """
     if lane_name == POLICY_LANE:
-        return _check_policy_change(files)
+        return _check_policy_change(files, config)
     lane = config.get_lane(lane_name)
     return LaneEngine.validate_files(files, lane, LaneEngine.shared_lanes(config))
 
 
-def _check_policy_change(files: List[str]) -> LaneValidationResult:
+def _check_policy_change(files: List[str],
+                         config: Optional[Config] = None) -> LaneValidationResult:
     """A policy change may touch the policy files and nothing else."""
     allowed: List[str] = []
     violations: List[LaneViolation] = []
-    permitted = policy_lane_paths()
+    permitted = policy_lane_paths(config)
     for f in files:
         norm = LaneEngine.normalize_path(f)
         if LaneEngine.is_bookkeeping(norm):
@@ -183,7 +202,7 @@ def check_checkout(
                 f"raised and decided, not made inside this one.")
         elif lane_name == POLICY_LANE:
             errors.append(f"{v.filepath}: a policy change may touch only the policy files "
-                          f"({', '.join(policy_lane_paths())}).")
+                          f"({', '.join(policy_lane_paths(config))}).")
         else:
             errors.append(f"{v.filepath}: outside lane '{lane_name}'.")
     return CheckReport(lane=lane_name, base=base, head=head, result=result, errors=errors)

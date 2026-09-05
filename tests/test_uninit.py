@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 
 from lanekeeper import paths
+from lanekeeper import codeowners as co
 from lanekeeper import uninit as uninit_mod
 from lanekeeper.capabilities import default_cards, save_card
 from lanekeeper.cli import GITIGNORE_BEGIN, GITIGNORE_END, ensure_gitignore
@@ -107,6 +108,34 @@ class TestUninitLeavesNothingBehind(InstalledRepoTestCase):
         self.assertIn("worktree", out, output_of(res))
         self.assertIn(paths.display_home(self.root), out, output_of(res))
         self.assertIn(".gitignore", out, output_of(res))
+
+
+class TestTheCodeownersBlock(InstalledRepoTestCase):
+    """CODEOWNERS is usually somebody's file before it is ours, so only the block
+    between the markers goes (#42)."""
+
+    def setUp(self):
+        super().setUp()
+        target = self.root / co.DEFAULT_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "# mine\n/docs/** @writers\n\n"
+            + co.BEGIN + "\n/src/** @kish21\n" + co.END + "\n",
+            encoding="utf-8")
+        self.codeowners = target
+
+    def test_the_block_goes_and_the_hand_written_rules_stay(self):
+        res = run_cli(["uninit", "--force"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        text = self.codeowners.read_text(encoding="utf-8")
+        self.assertNotIn(co.BEGIN, text)
+        self.assertIn("/docs/** @writers", text)
+
+    def test_a_file_that_was_only_ours_is_removed(self):
+        self.codeowners.write_text(co.BEGIN + "\n/src/** @kish21\n" + co.END + "\n",
+                                   encoding="utf-8")
+        run_cli(["uninit", "--force"], cwd=self.root)
+        self.assertFalse(self.codeowners.exists())
 
 
 class TestUnmergedWorkIsNeverDeleted(InstalledRepoTestCase):

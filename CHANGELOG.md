@@ -10,6 +10,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.9] — 2026-09-05
+
+### Added
+
+- **`lanekeeper codeowners` (#42).** Writes `.github/CODEOWNERS` from the lanes, inside
+  managed markers, so GitHub routes every pull request by the same boundaries the gate
+  checks — including for reviewers who have never heard of lanekeeper. Design note:
+  [`docs/codeowners.md`](docs/codeowners.md).
+
+  Three things decide the shape of it, and each is a way it could be silently wrong:
+
+  - **Last match wins in CODEOWNERS**, the opposite of the lane engine, where `deny`
+    beats `allow` and a shared zone beats both. The emission order is that precedence
+    written backwards — feature lanes, then shared zones, then the policy files. The
+    other way round, a feature lane whose `allow` covers the shared store quietly takes
+    the shared zone's ownership, in the file meant to advertise it.
+  - **An unanchored CODEOWNERS pattern matches at every level.** `src/*.ts` means two
+    files in `src/` to a lane, and would also claim `vendor/other/src/x.ts` written as
+    is, so every pattern is anchored. `!`, `[a-z]` and `?` have no CODEOWNERS
+    equivalent: those patterns are not written, and the file says which and why beside
+    the lane they came from. A lane's `deny` list is noted rather than approximated.
+  - **Over 3 MB GitHub stops loading the file entirely, and says nothing.** The command
+    refuses to write one that big rather than switching the routing off on the user's
+    behalf, and warns from 90%.
+
+  Owners are validated the way GitHub reads them (`@user`, `@org/team`, an email): a
+  handle without its `@` is not an error GitHub reports — the line is ignored, the
+  routing quietly does not happen, and the command that wrote it reported success. The
+  policy files are routed last whenever anyone owns them, because without that rule a
+  pattern as ordinary as `**/*.yaml` becomes the code owner of the file that defines
+  every lane; when nobody owns them the command says so. A file with one marker and not
+  the other is refused rather than repaired by guessing.
+
+  `--check` writes nothing and fails when the file no longer matches the lanes — one
+  line in CI. `--owner @handle` covers a repository with one maintainer; a team sets
+  `owner:` per lane, or `codeowners.default_owner`. A lane nobody owns gets no rule:
+  an owner-less line is a syntax error, and inventing an owner routes reviews to
+  somebody who never agreed to them. Hand-written rules outside the block survive, and
+  ones *below* it are counted and reported, because they win.
+
+### Changed
+
+- `lanekeeper uninit` removes the managed CODEOWNERS block too, and the file with it
+  when nothing else was ever in it.
+- A `policy`-lane pull request may carry `.github/CODEOWNERS`
+  (`check.policy_lane_paths`), since it is generated from the lanes and changes in the
+  same pull request they do. It is deliberately **not** in `paths.policy_paths()`: that
+  is the set no lane may touch, and a repository whose own lane already owned
+  `.github/**` should not lose that to a feature it has not turned on.
+
 ## [v0.7.8] — 2026-09-05
 
 Four more of the open issues, in the order a real run reaches them. The gate is
