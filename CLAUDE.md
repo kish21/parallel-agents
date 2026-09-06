@@ -35,6 +35,40 @@ lanes, and every ticket becomes a four-way escalation.
 the default: `init` reads feature slices from the tree first and falls back to layers only
 when the tree names fewer than two (#23, v0.7.8). `--layers` forces the old split.
 
+## The second decision that keeps getting re-derived: fewer steps (2026-09-06)
+
+Said three times by the owner across one test session, so it is written here rather than
+left to be rediscovered a fourth time:
+
+> "the user will not go through this many steps to spawn an agent and manage it — we have
+> to make it simpler"
+
+**The evidence, from the owner's own run of the deep-test protocol on 0.7.12.** Getting one
+agent from `pip install` to a labelled, green pull request took about a dozen steps. At
+least four of them were pure recovery from something lanekeeper already knew:
+
+- the worktree had no dependencies and nothing said so (#73)
+- `open` opened a window where `lanekeeper` does not resolve, then prescribed
+  `lanekeeper check` in it (#76)
+- `check` run in the wrong one of the two windows `open` created gave seven red lines and
+  no hint that the directory was the problem (#77)
+- `spawn` generated a branch name that already had an open pull request, and only `git
+  push` said so (#78)
+
+**The rule that follows.** When lanekeeper knows the answer, it acts, or it offers to act.
+It does not print the answer and leave the user to carry it. Printing a command for
+somebody to paste is not help; it is the work, moved.
+
+This is not in tension with *lanekeeper asks rather than guesses*. Asking is a question
+with the answer already computed — `--install`, `--lane-from-branch`, "this file is claimed
+by two lanes, mark it `shared`?". Guessing is deciding something only the user knows.
+#80 is the case where the tool did neither: it printed a warning about a collision, decided
+on its own to proceed, and carried on.
+
+**What it means for the fix session.** #62, #64, #72, #73, #76 and #79 are six spellings of
+one complaint and want one design pass, not six patches. A session that fixes them one at a
+time will produce six more messages telling the user what to do.
+
 ## The `start` vs `init` decision (2026-09-01, settled)
 
 `lanekeeper start` is the single guided entry point. It runs a **pre-flight FIRST** —
