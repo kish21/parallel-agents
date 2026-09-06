@@ -225,7 +225,10 @@ class TestAProposalIsUsedOnlyWhenAccepted(TicketSpawnTestCase):
         code, out, err = self.spawn(ticket="13", propose=True)
         self.assertEqual(code, 1, out + err)
         self.assertIn("src/search/**", out)
-        self.assertNotIn("not/in/repo.py", out, "only paths that exist in the tree")
+        # Only paths that exist in the tree are offered; the invented one is named as
+        # not used, with the reason, rather than dropped in silence (#71).
+        self.assertNotIn("--allow 'not/in/repo.py'", out)
+        self.assertIn("not used: not/in/repo.py", out)
         self.assertIn("--allow 'src/search/**'", out)
         self.assertEqual(self.agents(), {})
 
@@ -288,3 +291,37 @@ class TestTheResolver(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAProposalForNewWorkIsUsable(TicketSpawnTestCase):
+    """#71: every path a new feature creates is, by definition, not tracked yet."""
+
+    def setUp(self):
+        super().setUp()
+        self.write_policy()
+        self.claude = FakeClaude('{"paths": ["src/checkout/Summary.tsx", "src/search/box/Box.tsx",'
+                                 ' "src/theme/Toggle.tsx"]}')
+        from lanekeeper.divide import advisor as advisor_mod
+        real = advisor_mod.ClaudeCodeAdvisor
+        fake = self
+
+        class Patched(real):
+            def __init__(self, command, root, runner=None):
+                super().__init__(command, root, runner=fake.claude)
+
+            def check_available(self):
+                return None
+
+        advisor_mod.ClaudeCodeAdvisor = Patched
+        self.addCleanup(setattr, advisor_mod, "ClaudeCodeAdvisor", real)
+
+    def test_new_files_are_widened_to_their_existing_directory_and_said_so(self):
+        code, out, err = self.spawn(ticket="13", propose=True, yes=True)
+        self.assertEqual(code, 0, out + err)
+        lane = load_config(self.root).lanes["issue-13"]
+        self.assertEqual(lane.allow, ["src/checkout/**", "src/search/**"])
+        self.assertEqual(lane.paths_from, "proposed")
+        self.assertIn("src/checkout/**    (widened from src/checkout/Summary.tsx", out)
+        self.assertIn("src/search/**    (widened from src/search/box/Box.tsx", out)
+        self.assertIn("not used: src/theme/Toggle.tsx", out)
+        self.assertNotIn("src/theme", " ".join(lane.allow))

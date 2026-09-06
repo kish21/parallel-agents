@@ -15,6 +15,17 @@ Two mechanical checks stand between the model and the draft. A suggested path is
 only if it names a file that exists or a pattern that matches one, so the model cannot
 invent a directory. And a ticket that already states its files is never sent: the
 filer's statement outranks any guess.
+
+The first check has one honest exception (#71). Every path a *new* feature creates is,
+by definition, not in the tree yet, so a filter that keeps only existing files answers
+the bug-fix ticket well and cannot answer the greenfield one at all — which inverts
+the useful case, since a bug ticket usually names its file already. So a suggestion
+that matches nothing is kept only as the nearest directory that *does* exist, widened
+to a glob: `src/components/settings/ThemeToggle.tsx` is unverifiable,
+`src/components/settings/**` is checkable. A directory glob is a materially wider
+grant than a named file, so the proposal says which lines were widened, and a
+suggestion with no existing ancestor short of the project root is dropped with its
+reason said. Every glob written still matches something real.
 """
 
 from __future__ import annotations
@@ -23,6 +34,7 @@ import json
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
@@ -47,6 +59,22 @@ MAX_PATHS = 12
 
 class AdvisorError(RuntimeError):
     """The advisor could not be asked. Reported once; the division continues without it."""
+
+
+@dataclass(frozen=True)
+class Proposal:
+    """What the advisor's answer became once anchored to the tree (#71).
+
+    `paths` is what may be offered. `widened` records every suggestion that named a
+    file not in the tree and the directory glob it became — shown, because accepting
+    `src/hooks/**` is a different decision from accepting `src/hooks/useTheme.ts`.
+    `dropped` records what could be anchored to nothing, with the reason, so a drop is
+    reported rather than swallowed.
+    """
+
+    paths: Tuple[str, ...] = ()
+    widened: Tuple[Tuple[str, str], ...] = ()
+    dropped: Tuple[Tuple[str, str], ...] = ()
 
 
 class Advisor:
@@ -82,6 +110,8 @@ class ClaudeCodeAdvisor(Advisor):
         self.root = Path(root)
         self._run = runner or _subprocess_runner(self.root)
         self.asked: List[str] = []
+        #: The last answer in full, for a caller that wants to say what was widened.
+        self.last_proposal: Optional[Proposal] = None
 
     def check_available(self) -> None:
         if shutil.which(self.command) is None:
@@ -91,6 +121,10 @@ class ClaudeCodeAdvisor(Advisor):
 
     def propose_paths(self, ref: str, title: str, body: str,
                       files: Sequence[str]) -> Tuple[str, ...]:
+        return self.propose(ref, title, body, files).paths
+
+    def propose(self, ref: str, title: str, body: str, files: Sequence[str]) -> Proposal:
+        """The answer, anchored to the tree, with what was widened and what was dropped."""
         self.asked.append(ref)
         prompt = build_prompt(ref, title, body, files)
         try:
@@ -100,7 +134,8 @@ class ClaudeCodeAdvisor(Advisor):
         if res.returncode != 0:
             raise AdvisorError(
                 f"'{self.command} -p' exited {res.returncode}: {res.stderr.strip()[:200]}")
-        return keep_real_paths(parse_paths(res.stdout), files)
+        self.last_proposal = anchor_paths(parse_paths(res.stdout), files)
+        return self.last_proposal
 
 
 def build_prompt(ref: str, title: str, body: str, files: Sequence[str]) -> str:
@@ -111,9 +146,11 @@ def build_prompt(ref: str, title: str, body: str, files: Sequence[str]) -> str:
         "You are helping divide a backlog between coding agents. Each agent may only "
         "touch the files its ticket owns. This ticket does not say which files it "
         "touches. From the ticket and the file list, name the files or glob patterns "
-        "it would most likely change. Prefer a few directory globs over many single "
-        f"files. At most {MAX_PATHS} entries. Only name paths that appear in the list "
-        "or patterns that match them. Answer with a JSON object and nothing else: "
+        "it would most likely change or create. Prefer a few directory globs over many "
+        f"single files. At most {MAX_PATHS} entries. Paths that appear in the list, or "
+        "patterns that match them, are best; for new work you may name files that do "
+        "not exist yet, and each will be widened to the nearest directory that does. "
+        "Answer with a JSON object and nothing else: "
         '{"paths": ["path/or/glob", ...]}\n\n'
         f"Ticket #{ref}: {title}\n\n{body.strip()}\n\n"
         f"Files in the project:\n{listing}\n"
@@ -141,6 +178,60 @@ def parse_paths(text: str) -> Tuple[str, ...]:
         if text_item and text_item not in out:
             out.append(text_item)
     return tuple(out[:MAX_PATHS])
+
+
+def anchor_paths(paths: Sequence[str], files: Sequence[str]) -> Proposal:
+    """Every suggestion, kept as it is or as the nearest existing directory (#71).
+
+    A suggestion that matches a tracked file is kept verbatim. One that matches
+    nothing is walked up: the first ancestor directory that holds a tracked file
+    becomes `<dir>/**`. The walk stops short of a single top-level segment and of the
+    root — `src/**` is the project, not a boundary — and a suggestion that reaches
+    that point is dropped with the reason. Every glob written therefore matches
+    something real, which is `keep_real_paths`' guarantee kept by another route.
+    """
+    listed = list(files)
+    kept: List[str] = []
+    widened: List[Tuple[str, str]] = []
+    dropped: List[Tuple[str, str]] = []
+
+    def _add(path: str) -> None:
+        if path not in kept:
+            kept.append(path)
+
+    for path in paths:
+        if any(LaneEngine.match_glob(f, path) for f in listed):
+            _add(path)
+            continue
+        anchor = _existing_ancestor(path, listed)
+        if anchor is None:
+            top = path.split("/")[0]
+            dropped.append((path, (
+                f"nothing under '{top}/' exists in this project" if "/" in path
+                and not _directory_exists(top, listed)
+                else f"no directory it could belong to exists short of '{top}/', and "
+                     f"'{top}/**' would be the whole project, not a boundary")))
+            continue
+        glob = f"{anchor}/**"
+        widened.append((path, glob))
+        _add(glob)
+    return Proposal(paths=tuple(kept), widened=tuple(widened), dropped=tuple(dropped))
+
+
+def _directory_exists(directory: str, files: Sequence[str]) -> bool:
+    prefix = directory.rstrip("/") + "/"
+    return any(f.startswith(prefix) for f in files)
+
+
+def _existing_ancestor(path: str, files: Sequence[str]) -> Optional[str]:
+    """The deepest ancestor directory of `path`, at least two segments deep, that
+    holds a tracked file; None when there is none."""
+    parts = [p for p in path.replace("\\", "/").split("/") if p and p not in ("*", "**")]
+    for depth in range(len(parts) - 1, 1, -1):
+        candidate = "/".join(parts[:depth])
+        if _directory_exists(candidate, files):
+            return candidate
+    return None
 
 
 def keep_real_paths(paths: Sequence[str], files: Sequence[str]) -> Tuple[str, ...]:

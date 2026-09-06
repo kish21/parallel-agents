@@ -1075,17 +1075,33 @@ def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespac
     advisor = ClaudeCodeAdvisor(config.divide.advisor_command, root)
     try:
         advisor.check_available()
-        found = advisor.propose_paths(issue.ref, issue.title, issue.body, tracked_files(root))
+        proposal = advisor.propose(issue.ref, issue.title, issue.body, tracked_files(root))
     except AdvisorError as e:
         print(f"❌ {e}", file=sys.stderr)
         return None
+    found = proposal.paths
+    for original, why in proposal.dropped:
+        # Said, not swallowed: a suggestion the tree could not anchor is still a
+        # suggestion the person may want to act on by hand.
+        print(f"   (not used: {original} — {why})")
     if not found:
         print(f"❌ Claude Code could not name any files in this project for ticket "
               f"#{issue.ref}. Say them yourself with --allow.", file=sys.stderr)
         return None
+    widened = dict(proposal.widened)
+    by_glob = {}
+    for original, glob in proposal.widened:
+        by_glob.setdefault(glob, []).append(original)
     print(f"🤖 Claude Code proposes this boundary for #{issue.ref} ({issue.title}):")
     for p in found:
-        print(f"     {p}")
+        if p in by_glob:
+            # A directory glob is a wider grant than the file it stood in for, and
+            # the person accepting it should see that (#71).
+            print(f"     {p}    (widened from {', '.join(by_glob[p])}, which does not "
+                  f"exist yet)")
+        else:
+            print(f"     {p}")
+    del widened
     allow_line = " ".join(f"--allow '{p}'" for p in found)
     if getattr(args, "yes", False):
         return tuple(found)
