@@ -460,3 +460,30 @@ class TestGeneratedFiles(CheckoutTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAllowClosesTheLoopInsideAWorktree(CheckoutTestCase):
+    """The realistic case: the worktree already carries a committed policy, `allow`
+    widens the main checkout's, and `check` in the worktree must read that one."""
+
+    def test_it(self):
+        wt = self.tmp / ".lanekeeper" / "worktrees" / "agent-001"
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        self._git("worktree", "add", "-q", "-b", "parallel/agent-001/2-feat-02-x", str(wt))
+        (wt / ".lane").write_text("LANE='feat-02'\nAGENT_ID='agent-001'\n", encoding="utf-8")
+        self._commit("tests/unit/cart_test.py", cwd=wt)
+        res = self._check("--lane", "feat-02", cwd=wt)
+        self.assertEqual(res.returncode, 2, output_of(res))
+        res = run_cli(["allow", "tests/unit/cart_test.py"], cwd=wt)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        res = self._check("--lane", "feat-02", cwd=wt)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("Reading the policy from the main checkout", res.stdout)
+        # And once the worktree's copy matches again, nothing is said about it.
+        self._git("checkout", "-q", "main")
+        self._git("add", "-A")
+        self._git("commit", "-qm", "widen")
+        self._git("merge", "-q", "main", cwd=wt)
+        res = self._check("--lane", "feat-02", cwd=wt)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertNotIn("Reading the policy from the main checkout", res.stdout)

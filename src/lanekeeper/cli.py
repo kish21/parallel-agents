@@ -1195,30 +1195,14 @@ def cmd_check(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        config = load_config(root)
+        config = _policy_for_check(root, args)
     except FileNotFoundError:
-        # An agent worktree branched before the policy was committed carries no policy
-        # of its own, which is the ordinary case the first time somebody spawns an
-        # agent. The policy it was spawned under is in the repository's main checkout,
-        # so read it from there and say so: it is the same boundary, but it is not the
-        # one CI will see until the policy is committed.
-        borrowed = WorktreeManager.main_worktree_root()
-        config = None
-        if borrowed is not None and borrowed != root:
-            try:
-                config = load_config(borrowed)
-            except (FileNotFoundError, ValueError):
-                config = None
-        if config is None:
-            print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
-                  f"policy to check against.", file=sys.stderr)
-            print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
-                  f"branch is made from it. Merge it there, bring it into this branch, and "
-                  f"run the check again.", file=sys.stderr)
-            return 1
-        print(f"ℹ️  This checkout has no policy of its own; reading the one in {borrowed}.")
-        print(f"   Commit the policy on '{args.base.split('/')[-1]}' so the gate in CI "
-              f"reads it too.")
+        print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
+              f"policy to check against.", file=sys.stderr)
+        print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
+              f"branch is made from it. Merge it there, bring it into this branch, and "
+              f"run the check again.", file=sys.stderr)
+        return 1
     except ValueError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1
@@ -1258,6 +1242,45 @@ def cmd_check(args: argparse.Namespace) -> int:
         for line in check_mod.annotations(report):
             print(line)
     return 0 if report.passed else 2
+
+
+def _policy_for_check(root: Path, args: argparse.Namespace) -> Config:
+    """The policy `check` reads at `root`, which inside an agent's worktree is the
+    main checkout's whenever the two differ.
+
+    A worktree carries the policy as of the commit it was branched from — none at all
+    on the first agent, a stale one after `lanekeeper allow` has widened a lane in the
+    main checkout (#62). The main checkout's copy is the one being maintained, and it
+    is the one CI will read once it is committed: the gate checks the merge commit,
+    which carries the base branch's policy. So the local check reads it too, and says
+    so whenever that is not what this worktree holds. Raises FileNotFoundError when
+    neither has one, and ValueError for a policy that cannot be loaded.
+    """
+    main = WorktreeManager.main_worktree_root()
+    if main is None or main.resolve() == root.resolve():
+        return load_config(root)
+    own = paths.config_path(root)
+    theirs = paths.config_path(main)
+    if not theirs.exists():
+        return load_config(root)
+    if not own.exists():
+        config = load_config(main)
+        print(f"ℹ️  This checkout has no policy of its own; reading the one in {main}.")
+        print(f"   Commit the policy on '{args.base.split('/')[-1]}' so the gate in CI "
+              f"reads it too.")
+        return config
+    try:
+        same = own.read_bytes() == theirs.read_bytes()
+    except OSError:
+        same = False
+    if same:
+        return load_config(root)
+    config = load_config(main)
+    print(f"ℹ️  Reading the policy from the main checkout ({theirs}), which differs from "
+          f"this worktree's copy.")
+    print(f"   That is the policy the gate reads once it is committed; bring it into "
+          f"this branch when it is.")
+    return config
 
 
 def cmd_allow(args: argparse.Namespace) -> int:
