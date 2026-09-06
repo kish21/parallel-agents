@@ -250,11 +250,13 @@ def _relative(path: Path, root: Path) -> str:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    """The guided entry point. Runs the pre-flight, then divides the work, then stops.
+    """The guided entry point: the pre-flight, then the division, then what to run next.
 
-    The later steps — the board, the seats, preparing each agent — are issues #40, #33
-    and #41 and are not built. `start` says so rather than implying it did something it
-    did not.
+    It used to end by saying the board and the desks "are not built yet". They were
+    built in v0.7.0 — `board`, `spawn --ticket`, `open` — and the sentence outlived
+    them, telling people a feature did not exist while they had it installed. What
+    follows the division is not one more automatic step; it is the commands below, run
+    per agent as you want each one, which is the shape the one-command path settled on.
     """
     result, code = _step1_result(args)
     if result is not None and not result.passed and _wants_playbook(result):
@@ -268,8 +270,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         return code
     code = _run_step2(args, result)
     if code == 0:
-        print("   After that, 'start' would set each agent up with its own copy of the")
-        print("   project to work in — that part is not built yet (issues #33, #40, #41).")
+        print()
+        print("▶ Next, one command per agent — run them as you want each agent, not all now:")
+        print()
+        print("   lanekeeper spawn --ticket <number>   a worktree, branch, ports and the")
+        print("                                        ticket's own file list as its lane")
+        print("   lanekeeper install-gate              the pull-request gate, once per repository")
+        print()
+        print("   Optional: 'lanekeeper board' puts the lanes on a GitHub project board,")
+        print("   'lanekeeper codeowners' routes reviews by lane, 'lanekeeper open <agent>'")
+        print("   opens a prepared worktree in your editor.")
     return code
 
 

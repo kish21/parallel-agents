@@ -278,12 +278,17 @@ class DivideCommandTestCase(unittest.TestCase):
         self.run_divide(feature_backlog())
         self.assertEqual(first, self.draft_text())
 
-    def test_start_runs_both_steps_and_says_what_is_not_built(self):
+    def test_start_runs_both_steps_and_names_the_commands_that_follow(self):
+        """It used to end by calling the board and the desks unbuilt. They shipped in
+        v0.7.0, and a tool telling somebody a feature does not exist while they have it
+        installed is worse than saying nothing."""
         self.commit(feature_files())
         code, out = self.run_divide(feature_backlog(), command="start")
         self.assertEqual(code, 0, out)
         self.assertIn("catalog", out)
-        self.assertIn("not built yet", out)
+        self.assertIn("spawn --ticket", out)
+        self.assertIn("install-gate", out)
+        self.assertNotIn("not built", out)
 
     def test_the_division_does_not_read_the_tracker_twice(self):
         """Step 2 is handed step 1's tickets. Two reads of a live backlog can

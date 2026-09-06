@@ -125,7 +125,7 @@ them is the point: this file is a contract with a step that is not written yet.
                       reads for a file hint -> FlagKind.NO_FILE_HINT
                               |
                               v
-                   IntakeResult ----> step 2 (#38, not built)
+                   IntakeResult ----> step 2 (#38, shipped)
                       parses "Allowed File Paths" as the ticket's boundary
 ```
 
