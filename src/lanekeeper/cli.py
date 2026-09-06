@@ -51,6 +51,7 @@ from .divide import codebase as divide_codebase
 from .layout import detect_layout, measure_coverage, tracked_files
 from .environment import EnvironmentManager
 from .lanes import LaneEngine
+from .lock import FileLockError
 from .ports import TERMINAL_STATUSES, PortManager
 from .state import AgentState, AgentStatus, StateCorruptError, StateManager
 from .validator import Validator
@@ -1369,9 +1370,11 @@ def cmd_uninit(args: argparse.Namespace) -> int:
     # own state directory on construction, so asking it first would make `uninit`
     # create the very thing it then offers to remove — and report work to do on a
     # repository that has never seen lanekeeper.
+    state_mgr: Optional[StateManager] = None
     if paths.home(root).exists():
         try:
-            agents = StateManager(root).list_agents()
+            state_mgr = StateManager(root)
+            agents = state_mgr.list_agents()
         except Exception:
             # Deliberately broad, and deliberately silent: `uninit` is the way out of a
             # broken setup, so a state file it cannot read must not stop it.
@@ -1383,9 +1386,35 @@ def cmd_uninit(args: argparse.Namespace) -> int:
         except Exception:
             pass
 
-    plan = uninit_mod.build_plan(
-        root, worktree_mgr, agents=agents, branch_prefix=branch_prefix,
-        gitignore_marker=GITIGNORE_BEGIN, codeowners_path=codeowners_path)
+    def _build():
+        return uninit_mod.build_plan(
+            root, worktree_mgr, agents=agents, branch_prefix=branch_prefix,
+            gitignore_marker=GITIGNORE_BEGIN, codeowners_path=codeowners_path)
+
+    # Under the git lock for the same reason cleanup is: building the plan lists the
+    # worktrees, and a cleanup running elsewhere is deleting the directories that read
+    # walks. Only when there is a state directory to lock in — taking a lock would
+    # create one, and `uninit` creating what it then offers to remove is the bug this
+    # branch exists to avoid.
+    #
+    # A lock somebody else holds must not stop it either. `uninit` is the way out of a
+    # broken setup, and refusing to even show a plan because another command is mid-spawn
+    # would strand the person exactly where this command exists to rescue them. It says
+    # so and reads anyway.
+    locked = state_mgr is not None
+    if locked:
+        try:
+            with state_mgr.git_lock(timeout_seconds=15.0):
+                plan = _build()
+        except FileLockError:
+            locked = False
+            print("⚠️  Another lanekeeper operation is changing this repository's "
+                  "worktrees.")
+            print("   Reading them anyway; if the plan below looks wrong, let that "
+                  "finish and run again.")
+            plan = _build()
+    else:
+        plan = _build()
 
     if plan.is_empty:
         print("ℹ️  Nothing to remove — this repository has no lanekeeper files in it.")
@@ -1411,7 +1440,19 @@ def cmd_uninit(args: argparse.Namespace) -> int:
             return 1
 
     print()
-    for line in uninit_mod.apply(plan, worktree_mgr, GITIGNORE_BEGIN, GITIGNORE_END):
+    # The removals are the writer side of the same race: they mutate `.git/worktrees`
+    # while a `doctor` elsewhere may be reading it. `apply` holds the lock across those
+    # and releases it before removing lanekeeper's own directory, which is where the
+    # lock file lives.
+    git_lock = (lambda: state_mgr.git_lock(timeout_seconds=15.0)) if locked else None
+    try:
+        lines = uninit_mod.apply(plan, worktree_mgr, GITIGNORE_BEGIN, GITIGNORE_END,
+                                 git_lock=git_lock)
+    except FileLockError:
+        print("⚠️  Another lanekeeper operation still holds the repository; removing "
+              "without waiting.")
+        lines = uninit_mod.apply(plan, worktree_mgr, GITIGNORE_BEGIN, GITIGNORE_END)
+    for line in lines:
         print(f"   {line}")
     print()
     print("✅ Lanekeeper is out of this repository.")
@@ -1474,9 +1515,17 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     # demonstrably succeeded.
     removal_error: Optional[str] = None
     if worktree_path.exists():
-        registered = {wt.path.resolve() for wt in worktree_mgr.list_worktrees()}
         try:
             with state_mgr.git_lock():
+                # Read the registry *inside* the lock that guards the removal below.
+                # `git worktree list` reads `.git/worktrees/<id>/`, which is exactly what
+                # another agent's cleanup deletes; taken outside the lock, the read lands
+                # mid-deletion and git exits 128 — "failed to read
+                # .git/worktrees/agent-007/commondir" — which reached the user as a
+                # traceback out of an ordinary cleanup. The lock exists so that directory
+                # has one writer at a time; a reader of the same directory belongs under
+                # it too. CI caught this on a ten-agent concurrent cleanup.
+                registered = {wt.path.resolve() for wt in worktree_mgr.list_worktrees()}
                 if worktree_path.resolve() in registered:
                     worktree_mgr.remove_worktree(worktree_path, force=force)
                 else:

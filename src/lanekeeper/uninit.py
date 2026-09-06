@@ -17,6 +17,7 @@ not matter.
 from __future__ import annotations
 
 import shutil
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -234,13 +235,31 @@ def _strip_managed(target: Path, begin: str, end: str, label: str) -> List[str]:
 
 
 def apply(plan: UninitPlan, worktree_mgr: WorktreeManager,
-          begin: str = "", end: str = "") -> List[str]:
+          begin: str = "", end: str = "", git_lock=None) -> List[str]:
     """Carries out the plan. Returns the lines describing what actually happened.
 
     Reported rather than assumed: git refuses to delete an unmerged branch, and that
     refusal is the whole safety property here, so it has to reach the person as a
     sentence and not as a silent difference between the plan and the result.
+
+    `git_lock` is a callable returning the repository's git lock, held across the
+    worktree removals and the prune — the mutations of `.git/worktrees` that a
+    concurrent `doctor` or `cleanup` is reading. It is released **before** lanekeeper's
+    own directory is removed, because the lock file lives inside that directory and
+    Windows will not delete a file that is still open.
     """
+    done: List[str] = []
+
+    lock = git_lock() if git_lock is not None else nullcontext()
+    with lock:
+        done.extend(_remove_worktrees_and_branches(plan, worktree_mgr))
+
+    return done + _remove_files(plan, begin, end)
+
+
+def _remove_worktrees_and_branches(plan: UninitPlan,
+                                   worktree_mgr: WorktreeManager) -> List[str]:
+    """Everything that mutates `.git/`. Held under the git lock by `apply`."""
     done: List[str] = []
 
     for wt in plan.worktrees:
@@ -273,6 +292,14 @@ def apply(plan: UninitPlan, worktree_mgr: WorktreeManager,
         done.append(f"Kept {len(kept)} branch(es) git would not delete — they hold commits "
                     f"nobody has merged, or one of them is checked out: {', '.join(kept)}.")
         done.append("   Delete those yourself with 'git branch -D <name>' when you are sure.")
+
+    return done
+
+
+def _remove_files(plan: UninitPlan, begin: str, end: str) -> List[str]:
+    """Everything that touches only lanekeeper's own files. No git lock: the lock file
+    itself lives inside the directory this removes."""
+    done: List[str] = []
 
     if plan.home is not None and plan.home.exists():
         shutil.rmtree(plan.home, ignore_errors=True)

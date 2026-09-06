@@ -8,6 +8,7 @@ from typing import List, Optional
 from .adapters.process_adapter import ProcessAdapter
 from .capabilities import CapabilityRegistry
 from .config import Config, load_config
+from .lock import FileLockError
 from .ports import PortManager, TERMINAL_STATUSES
 from .state import AgentState, AgentStatus, StateManager
 from .worktree import WorktreeManager
@@ -102,7 +103,33 @@ class Doctor:
 
         # 3. Worktree Integrity Check
         agents = self.state.list_agents()
-        git_worktrees = {wt.path.resolve(): wt for wt in self.worktree_mgr.list_worktrees()}
+        # Under the git lock: `git worktree list` reads `.git/worktrees/<id>/`, and a
+        # cleanup or repair running elsewhere is deleting those directories. Unlocked,
+        # this read can land mid-deletion and git exits 128, turning a diagnostic into a
+        # crash. Waiting a moment for the writer also means the reading is consistent
+        # rather than taken halfway through somebody else's removal.
+        # A short timeout, and a held lock is a finding rather than a traceback: another
+        # lanekeeper operation legitimately holds it for the moment its worktree change
+        # takes, and `doctor` reporting that is more useful than `doctor` hanging or
+        # crashing. Reading anyway is not an option — an unlocked read is the crash this
+        # whole change removes — so the run stops here and says what is happening.
+        try:
+            with self.state.git_lock(timeout_seconds=10.0):
+                git_worktrees = {wt.path.resolve(): wt
+                                 for wt in self.worktree_mgr.list_worktrees()}
+        except FileLockError:
+            report.checks.append(
+                DiagnosticCheck(
+                    name="Worktrees",
+                    passed=False,
+                    message="Another lanekeeper operation is changing this repository's "
+                            "worktrees, so they could not be read.",
+                    details="A spawn, cleanup or repair holds the git lock. Nothing is "
+                            "wrong; run 'lanekeeper doctor' again once it has finished.",
+                    repairable=False,
+                )
+            )
+            return report
 
         # Only live agents are expected to have a worktree. A STOPPED or FAILED agent
         # whose directory is gone is a finished agent, not a fault; reporting it as one

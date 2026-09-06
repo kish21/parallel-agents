@@ -10,6 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.11] — 2026-09-06
+
+### Fixed
+
+- **`cleanup`, `doctor` and `uninit` read the worktree registry without the lock that
+  every writer of it takes.** CI caught it on a ten-agent concurrent cleanup: `git
+  worktree list --porcelain` walks `.git/worktrees/<id>/`, which is exactly what another
+  agent's cleanup is deleting, and the read landed mid-deletion —
+
+      fatal: failed to read .git/worktrees/agent-007/commondir: No such file or directory
+
+  which reached the user as a `GitError` traceback out of an ordinary
+  `lanekeeper cleanup`. In `cmd_cleanup` the read sat three lines above the
+  `git_lock()` that guards the removal it feeds; it is now inside it. `Doctor.diagnose`
+  and `uninit`'s plan take the same lock for the same reason. `uninit` takes it only
+  when there is already a state directory, because acquiring it creates one — and
+  `uninit` creating what it then offers to remove is a trap this file has recorded
+  before.
+
+  The code review found the fix incomplete in three ways, all fixed and pinned:
+  `uninit`'s *writer* half — removing worktrees and pruning — was still unlocked, so the
+  invariant did not actually hold (it now holds the lock across those, and releases it
+  before removing lanekeeper's own directory, because the lock file lives inside it and
+  Windows will not delete an open file); and both new acquisitions were unguarded, so a
+  lock somebody else held turned `doctor` into a two-minute hang ending in a traceback,
+  and stopped `uninit` — the escape hatch from a broken setup — before it could even
+  print a plan. `doctor` now waits ten seconds and reports a busy repository as a
+  finding; `uninit` says so and carries on. `StateManager.git_lock` takes a timeout.
+
+  **The timing could not be reproduced on demand** — eight suite runs and two targeted
+  git-level harnesses stayed clean on a fast machine — so `tests/test_worktree_registry_lock.py`
+  pins the properties that make the crash impossible instead of the crash itself: every
+  reader *and writer* of `.git/worktrees` runs while holding the git lock, and a lock
+  held elsewhere is never a traceback. Five of its seven tests fail against the code CI
+  caught.
+
 ## [v0.7.10] — 2026-09-05
 
 Documentation only. No behaviour changed.

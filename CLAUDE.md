@@ -564,6 +564,56 @@ been observed against live GitHub.
 
 ---
 
+## Session of 2026-09-06: the race CI found — v0.7.11
+
+CI failed one job on the v0.7.10 documentation PR, on a change containing no code. The
+failure was real and pre-existing: `test_concurrency`'s ten-agent cleanup hit
+
+    fatal: failed to read .git/worktrees/agent-007/commondir: No such file or directory
+
+out of `git worktree list --porcelain`, raised as an uncaught `GitError` from
+`cmd_cleanup`.
+
+**The defect, visible by inspection:** `cmd_cleanup` computed
+`registered = {... list_worktrees()}` **outside** the `state_mgr.git_lock()` that guards
+the removal three lines below. `git worktree list` walks `.git/worktrees/<id>/`, which
+is precisely what a concurrent cleanup deletes. The lock's own docstring says it exists
+because these commands "are not safe to run concurrently against one repository" — a
+reader of that directory belongs under it too. `Doctor.diagnose` (line 105) and
+`uninit`'s plan had the same unlocked read; all three are fixed.
+
+**Could not reproduce the timing.** Eight runs of `test_concurrency`, plus two targeted
+git-level harnesses (remove-vs-list, prune-vs-list, 40 worktrees, four reader threads)
+— all clean on this machine. Said out loud rather than papered over: the fix rests on
+the code being wrong by inspection, not on a red test turned green.
+
+So the regression test pins the **structural** property instead:
+`tests/test_worktree_registry_lock.py` spies on `WorktreeManager.list_worktrees` and
+asserts the git lock's re-entrancy depth is non-zero at the moment of the read — and,
+after the review, at the moment of the write. Seven tests; five fail against the unfixed
+code with a message naming the hazard.
+
+**The review found the fix half-done, which is the interesting part.** The invariant I
+wrote in the commit — "every reader of `.git/worktrees` runs under the lock every writer
+takes" — was false in my own code: `uninit.apply` removes worktrees and prunes, and did
+it unlocked. `apply` now takes a `git_lock` callable and holds it across the worktree
+half only: the lock file lives inside `.lanekeeper/`, and holding it while removing that
+directory would fail on Windows. The other two findings were the same mistake twice:
+both new acquisitions were unguarded, so a lock held by a concurrent spawn turned
+`doctor` into a two-minute hang ending in a traceback — the exact "diagnostic becomes a
+crash" the new comment claimed to remove — and stopped `uninit` before it printed a
+plan. `git_lock` takes a timeout now; `doctor` waits ten seconds and reports a busy
+repository as a finding; `uninit` says so and reads anyway, because it is the way out of
+a broken setup.
+
+**One trap re-entered while fixing it.** The first attempt wrapped `uninit`'s plan in
+`StateManager(root).git_lock()` unconditionally — and `StateManager` creates its state
+directory on construction, so `uninit` created the directory it then offered to remove.
+That is the same trap recorded in the v0.7.8 entry, hit again from the other side. The
+lock is now taken only when `paths.home()` already exists.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use
