@@ -27,8 +27,11 @@ from typing import List, Optional, Sequence, Tuple
 
 from .capabilities import CapabilityRegistry, save_card
 from .config import Config, LaneConfig, save_config
+from .deps import DependencyStep
 from .divide import boundary, names
 from .divide.collision import patterns_intersect
+from .invocation import fallback_line, invocation
+from . import paths
 from .trackers.base import TrackedIssue
 
 
@@ -37,6 +40,12 @@ class Source(Enum):
     FLAG = "--allow"
     PROPOSED = "the advisor's proposal"
     EXISTING = "the lane already in the policy"
+
+    @property
+    def paths_from(self) -> str:
+        """What `config.yaml` records about where the paths came from (#70)."""
+        return {Source.TICKET: "ticket", Source.FLAG: "flag",
+                Source.PROPOSED: "proposed"}.get(self, "")
 
 
 class NoBoundaryError(ValueError):
@@ -107,15 +116,30 @@ def resolve(config: Config, issue: TrackedIssue, explicit_lane: str = "",
 
 
 def collisions(config: Config, name: str, paths: Sequence[str]) -> List[Tuple[str, str, str]]:
-    """(other lane, its pattern, our pattern) for every pair that could share a file."""
+    """(other lane, its pattern, our pattern) for every pair that could share a file.
+
+    A shared zone is left out: it is the *remedy* for an overlap, checked before either
+    lane's own `allow`, so counting it would report the fix as the problem. A retired
+    lane is left out too (#70): its work is finished, and a warning that names overlaps
+    with lanes from months ago is a warning people learn to skip — and this one is
+    load-bearing.
+    """
+    zones = [p for lane in config.lanes.values() if lane.shared for p in lane.allow]
     found = []
     for other in sorted(config.lanes):
-        if other == name:
+        if other == name or config.lanes[other].shared or config.lanes[other].retired:
             continue
         for theirs in config.lanes[other].allow:
             for ours in paths:
-                if patterns_intersect(theirs, ours):
-                    found.append((other, theirs, ours))
+                if not patterns_intersect(theirs, ours):
+                    continue
+                # An overlap a shared zone already covers is that zone doing its job,
+                # the same reading `divide.collision` makes. Without it, marking the
+                # file shared would leave the warning printed every time regardless.
+                if any(patterns_intersect(z, theirs) and patterns_intersect(z, ours)
+                       for z in zones):
+                    continue
+                found.append((other, theirs, ours))
     return found
 
 
@@ -129,7 +153,12 @@ def ensure_lane(config: Config, root: Path, lane: TicketLane) -> Tuple[bool, Lis
     """
     created = False
     if not config.has_lane(lane.name):
-        config.lanes[lane.name] = LaneConfig(name=lane.name, allow=list(lane.paths), deny=[])
+        # The ticket and where the paths came from are written down with the lane
+        # (#70), so a person reading the file later can answer "what is this for" and
+        # "did anybody actually decide these paths" without this command's scrollback.
+        config.lanes[lane.name] = LaneConfig(
+            name=lane.name, allow=list(lane.paths), deny=[],
+            ticket=str(lane.issue.ref), paths_from=lane.source.paths_from)
         save_config(config, root)
         created = True
     widened = []
@@ -185,13 +214,102 @@ def describe(lane: TicketLane, created: bool, widened: Sequence[str]) -> str:
     if widened:
         lines.append(f"   Seat card{'s' if len(widened) > 1 else ''} {', '.join(widened)} "
                      f"now allow{'' if len(widened) > 1 else 's'} this lane.")
-    if lane.collisions:
-        lines.append("")
-        lines.append("   ⚠️  Another lane could touch the same files. Two agents on one file "
-                     "is the collision this tool exists to prevent, so settle it first:")
-        for other, theirs, ours in lane.collisions:
-            lines.append(f"     '{other}' claims {theirs}, this ticket claims {ours}")
     return "\n".join(lines)
+
+
+def contested_pattern(theirs: str, ours: str) -> str:
+    """Of two overlapping patterns, the one that names the smaller zone.
+
+    That is the zone to share: when `feat-02` claims `src/pages/**` and this ticket
+    claims `src/pages/checkout/**`, the contested code is the checkout page, not every
+    page. Fewer wildcards is narrower; on a tie the longer spelling is the more
+    specific one. Two identical patterns — the common case, one file named on two
+    tickets — are their own answer.
+    """
+    def width(pattern: str) -> Tuple[int, int]:
+        return (pattern.count("*"), -len(pattern))
+    return min((theirs, ours), key=width)
+
+
+def shared_zone_paths(lane: TicketLane) -> List[str]:
+    """The paths a shared zone would need to hold to settle every overlap reported."""
+    out: List[str] = []
+    for _, theirs, ours in lane.collisions:
+        contested = contested_pattern(theirs, ours)
+        if contested not in out:
+            out.append(contested)
+    return out
+
+
+def collision_report(lane: TicketLane, root: Optional[Path] = None) -> str:
+    """The overlap, what the gate will do about it, and the answer that already exists.
+
+    Printed *before* the lane is written and long before a worktree exists (#80). The
+    old wording said "settle it first" three lines after the lane had gone into the
+    policy and just before the agent was started, so the advice was about a decision
+    already taken the other way.
+
+    Three things the old line did not say. Both lanes allow the file, so both agents'
+    checks pass and the clash surfaces at merge — without that sentence the person is
+    *more* confident after the warning, because everything afterwards is green. The
+    remedy is `shared: true` (#25), built for exactly this file: a zone nobody is
+    spawned into, checked before either lane's own `allow`, so a change there is
+    escalated instead of quietly permitted twice. And nothing has been written yet.
+    """
+    if not lane.collisions:
+        return ""
+    zone = shared_zone_paths(lane)
+    lines = [
+        "⚠️  Another lane could touch the same files. Both lanes allow them, so both",
+        "    agents' changes pass their own checks — and meet at merge. That is the",
+        "    collision this tool exists to prevent, and the gate will not catch it:",
+    ]
+    for other, theirs, ours in lane.collisions:
+        lines.append(f"      '{other}' claims {theirs}, this ticket claims {ours}")
+    lines += [
+        "",
+        "    The designed answer is a shared zone: 'shared: true' on a lane nobody is",
+        "    spawned into, checked before either lane's own list, so a change there is",
+        f"    escalated rather than passed twice. In {paths.display_config_path(root)}:",
+        "      - name: shared",
+        "        shared: true",
+        "        allow:",
+    ]
+    lines += [f"        - {p}" for p in zone]
+    lines.append("")
+    lines.append("    Nothing has been written yet.")
+    return "\n".join(lines)
+
+
+def collision_proceeding(lane: TicketLane, accepted: bool, interactive: bool) -> str:
+    """The one line printed when a spawn goes ahead over an overlap."""
+    if accepted:
+        return ("    Proceeding: --accept-overlap says this overlap is deliberate.")
+    if not interactive:
+        return ("    Proceeding: there is no terminal to ask on. Pass --accept-overlap to "
+                "say the overlap is deliberate, or add the shared zone above first.")
+    return "    Proceeding as you asked."
+
+
+def mark_shared(config: Config, root: Path, zone_paths: Sequence[str],
+                name: str = "shared") -> str:
+    """Writes the contested paths into a shared zone in the policy, and returns its name.
+
+    An existing `shared: true` lane is extended rather than a second one made; a
+    project with a lane already called `shared` that is not a zone gets `shared-zone`,
+    because renaming somebody's lane is not this command's to do.
+    """
+    existing = next((l for l in config.lanes.values() if l.shared), None)
+    if existing is None:
+        while config.has_lane(name):
+            name = f"{name}-zone" if not name.endswith("-zone") else f"{name}2"
+        existing = LaneConfig(name=name, allow=[], deny=[], shared=True)
+        config.lanes[name] = existing
+    for p in zone_paths:
+        if p not in existing.allow:
+            existing.allow.append(p)
+    save_config(config, root)
+    return existing.name
 
 
 def agent_prompt(lane: TicketLane) -> str:
@@ -208,19 +326,47 @@ def agent_prompt(lane: TicketLane) -> str:
             f"of editing it — a change outside the list is rejected before it can merge.")
 
 
-def next_steps(lane: TicketLane, gate_workflow_exists: bool, base: str = "main") -> str:
+def commit_policy_advice(branch: str = "", protected: Sequence[str] = ("main", "master"),
+                         root: Optional[Path] = None) -> str:
+    """Where to commit the policy, said without naming a branch it should not go on.
+
+    The old sentence said "Commit the policy here, on 'main'". "Here" meant the main
+    checkout as opposed to the agent's worktree, and "main" was the repository's
+    default branch whatever the person was on — so a tester on `my-test` was told to
+    switch branches, and told to commit straight to a branch that the very file being
+    committed lists under `protected_branches` (#69). The correct advice is: in this
+    checkout, on the branch you are on, and land it as a pull request labelled
+    `lane: policy`, like any other change.
+    """
+    home = paths.display_home(root).rstrip("/")
+    commit = f"git add {home} .gitignore && git commit -m 'Add the lane policy'"
+    if branch and branch not in protected:
+        where = (f"Commit the policy on '{branch}' — in this checkout, not inside the "
+                 f"agent's worktree — before you commit anything else, and open it as a "
+                 f"pull request labelled 'lane: policy'.")
+    else:
+        where = (f"Commit the policy before you commit anything else — in this checkout, "
+                 f"not inside the agent's worktree, and ideally on a branch of its own, "
+                 f"opened as a pull request labelled 'lane: policy'.")
+    return (f"{where} CI can only enforce a policy that is in the repository, and an "
+            f"uncommitted one gets swept into your next 'git add -A' by accident, where "
+            f"the gate denies it — a policy change is its own lane:\n      {commit}")
+
+
+def next_steps(lane: TicketLane, gate_workflow_exists: bool, base: str = "main",
+               branch: Optional[str] = None,
+               protected: Sequence[str] = ("main", "master"),
+               root: Optional[Path] = None) -> str:
+    """`base` is kept for callers that still pass it; the advice no longer names it."""
+    inv = invocation()
     lines = []
     if not gate_workflow_exists:
         lines.append("The gate is not installed yet. It is one file — the GitHub Action "
                      "that runs this check on every pull request:\n"
-                     "      lanekeeper install-gate")
+                     f"      {inv} install-gate")
     if lane.policy_uncommitted:
-        lines.append(
-            f"Commit the policy here, on '{base}', before you commit anything else. CI "
-            f"can only enforce a policy that is in the repository, and an uncommitted "
-            f"one gets swept into your next 'git add -A' by accident, where the gate "
-            f"denies it — a policy change is its own lane:\n"
-            f"      git add .lanekeeper .gitignore && git commit -m 'Add the lane policy'")
+        lines.append(commit_policy_advice(branch if branch is not None else base,
+                                          protected, root))
     lines.append(f"When the agent opens its pull request, label it 'lane: {lane.name}'. "
                  f"The gate fails the change if any file is outside the lane.")
     return "\n".join(f"  • {line}" for line in lines)
@@ -236,32 +382,82 @@ def _short(worktree: Path, root: Optional[Path] = None) -> str:
         return str(worktree)
 
 
+def install_step(where: str, step: Optional[DependencyStep]) -> List[str]:
+    """The dependency step, or nothing for a project that has none (#73)."""
+    if step is None:
+        return []
+    if step.command:
+        return [
+            f"Once per worktree, install the dependencies — a worktree is a fresh",
+            f"checkout, so it has none ({step.evidence} says how):",
+            "",
+            f"       cd {where} && {step.command}",
+        ]
+    return [
+        f"A fresh worktree has no dependencies installed, and this project has a",
+        f"{step.evidence} but no lockfile — so which install command to run in",
+        f"{where} is your call. Once per worktree, not once per task.",
+    ]
+
+
 def how_to_work(lane: TicketLane, worktree: Path, agent_id: str,
-                root: Optional[Path] = None) -> str:
+                root: Optional[Path] = None, editor_opened: bool = False,
+                dependencies: Optional[DependencyStep] = None) -> str:
     """What to actually do next, which is where the first real user got stuck.
 
     Everything else `spawn` prints is bookkeeping — the policy, the label, the gate.
     None of it says "now do the work", and a person looking at a freshly opened
     editor has no idea that the tool has finished its part.
+
+    `editor_opened` is whether a window was actually opened (#67): the first wording
+    told everybody "the editor window that just opened is already there", and without
+    `--open` no window had opened. Being told to look at a window that is not there is
+    the kind of small wrongness that makes somebody doubt everything else the tool
+    just said — in the block that exists to be the first thing they trust.
     """
     where = _short(worktree, root)
-    return "\n".join([
-        "▶ Now do the work. Lanekeeper has prepared the desk; it does not write code.",
+    inv = invocation()
+    steps: List[List[str]] = []
+    steps.append(install_step(where, dependencies))
+    if editor_opened:
+        steps.append([
+            f"In {where} — the editor window that just opened is already",
+            "there — start your coding agent: claude, cursor, whatever you use.",
+        ])
+    else:
+        steps.append([
+            f"Open {where} in your editor ('{inv} open {agent_id}' does it),",
+            "then start your coding agent there: claude, cursor, whatever you use.",
+        ])
+    steps.append([
+        "Give it the task and its boundary. This prompt carries both:",
         "",
-        f"  1. In {where} (the editor window that just opened is already",
-        "     there), start your coding agent — claude, cursor, whatever you use.",
-        "",
-        "  2. Give it the task and its boundary. This prompt carries both:",
-        "",
-        f"       {agent_prompt(lane)}",
-        "",
-        "  3. When it is done, from that same folder:",
-        "",
-        f"       lanekeeper check --lane {lane.name} --base main --working-tree",
-        "",
-        "     Green means every changed file is inside the boundary; red names the one",
-        f"     that is not. The same boundary is in {where}/.lane.",
+        f"  {agent_prompt(lane)}",
     ])
+    steps.append([
+        "When it is done, from that same folder:",
+        "",
+        f"  {inv} check --lane {lane.name} --base main --working-tree",
+        "",
+        "Green means every changed file is inside the boundary; red names the one",
+        f"that is not. The same boundary is in {where}/.lane.",
+    ])
+    lines = ["▶ Now do the work. Lanekeeper has prepared the desk; it does not write code."]
+    n = 0
+    for step in steps:
+        if not step:
+            continue
+        n += 1
+        lines.append("")
+        lines.append(f"  {n}. {step[0]}")
+        lines += [f"     {line}" if line else "" for line in step[1:]]
+    # The check runs in a different window from the one this was printed in, and that
+    # window's PATH is not ours to fix (#76). Said once, here, where the hand-over is.
+    fallback = fallback_line(inv)
+    if fallback:
+        lines.append("")
+        lines.append(f"     {fallback}")
+    return "\n".join(lines)
 
 
 def confirm_proposal(ref: str, paths: Sequence[str], answer: Optional[str]) -> bool:

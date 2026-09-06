@@ -46,6 +46,8 @@ from .trackers import UnknownTrackerError, get_tracker
 from .trackers.base import TrackerError
 from . import ticket as ticket_mod
 from . import uninit as uninit_mod
+from . import deps as deps_mod
+from .invocation import fallback_line, invocation
 from .divide import boundary as divide_boundary
 from .divide import codebase as divide_codebase
 from .layout import detect_layout, measure_coverage, tracked_files
@@ -809,33 +811,47 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     state_mgr.save_agent(agent)
 
     ports_display = ", ".join(f"{k}: {v}" for k, v in allocated_ports.items())
+    inv = invocation()
     print(f"\n🚀 Agent '{name}' ({agent_id}) successfully spawned!")
     print(f"  • Worktree: {resolved_path}")
     print(f"  • Branch:   {branch_name}")
     print(f"  • Lane:     {lane}")
     print(f"  • Ports:    {ports_display}")
     print(f"  • Seat:     {seat}")
-    print(f"\nTo inspect:  lanekeeper inspect {agent_id}")
-    print(f"To validate: lanekeeper validate {agent_id}")
+    print(f"\nTo inspect:  {inv} inspect {agent_id}")
+    print(f"To validate: {inv} validate {agent_id}")
     if ticket_lane is not None:
         print()
-        print(ticket_mod.next_steps(ticket_lane, (root / check_mod.WORKFLOW_PATH).exists(),
-                                    base=worktree_mgr.get_default_branch()))
+        print(ticket_mod.next_steps(
+            ticket_lane, (root / check_mod.WORKFLOW_PATH).exists(),
+            base=worktree_mgr.get_default_branch(),
+            # The branch the person is actually on, so the advice about committing the
+            # policy names it — and never names a protected one (#69).
+            branch=worktree_mgr.current_branch(),
+            protected=config.git.protected_branches, root=root))
     if first_worktree:
         # A whole second copy of the project appearing in the sidebar reads as a fault
         # to somebody who has never used git worktrees. Say what it is, once.
         print(f"\n  ℹ️  {config.worktree_dir}/ now holds a separate checkout per agent. Git "
-              f"ignores it, and\n      'lanekeeper cleanup {agent_id}' removes it. To keep "
+              f"ignores it, and\n      '{inv} cleanup {agent_id}' removes it. To keep "
               f"it outside the project, set\n      'worktree_dir: ../lk-worktrees' in "
               f"{paths.display_config_path()}.")
+    # The editor is opened *before* the instructions are printed, so the instructions
+    # can say truthfully whether a window is there (#67). A missing editor is reported
+    # and the spawn still succeeded: the agent exists whether or not the window does.
+    editor_opened = False
+    open_code = 0
+    if getattr(args, "open", False):
+        open_code = _open_desk(config, resolved_path, agent_id)
+        editor_opened = open_code == 0
     if ticket_lane is not None:
         print()
-        print(ticket_mod.how_to_work(ticket_lane, resolved_path, agent_id, root=root))
+        print(ticket_mod.how_to_work(ticket_lane, resolved_path, agent_id, root=root,
+                                     editor_opened=editor_opened,
+                                     dependencies=deps_mod.detect(root)))
     if getattr(args, "open", False):
-        # The agent exists whether or not the editor opens; a missing editor is reported
-        # and the spawn still succeeded.
-        return _open_desk(config, resolved_path, agent_id)
-    print(f"\nTo open:     lanekeeper open {agent_id}")
+        return open_code
+    print(f"\nTo open:     {inv} open {agent_id}")
     return 0
 
 
@@ -878,6 +894,31 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
         print(f"❌ {e}", file=sys.stderr)
         return None
 
+    # The overlap is reported before anything is written (#80). It used to be printed
+    # after the lane was in the policy and just before the worktree was made, so
+    # "settle it first" arrived after it had been settled the other way. Nothing here
+    # blocks: on a terminal the person is asked, and off one the spawn proceeds with
+    # the warning, because scripts and CI have nobody to answer.
+    if lane.collisions:
+        print(ticket_mod.collision_report(lane, root))
+        accepted = getattr(args, "accept_overlap", False)
+        interactive = _interactive() and not accepted
+        if interactive:
+            choice = _ask_about_overlap()
+            if choice == "n":
+                print("   Stopped. Nothing was written; edit the tickets or add the shared "
+                      "zone, then run again.")
+                return None
+            if choice == "s":
+                zone = ticket_mod.mark_shared(config, root, ticket_mod.shared_zone_paths(lane))
+                print(f"   Wrote the contested paths into the shared zone '{zone}' in "
+                      f"{paths.display_config_path()}. A change there is now escalated "
+                      f"from either lane.")
+                lane.collisions = ticket_mod.collisions(config, lane.name, lane.paths)
+        if lane.collisions:
+            print(ticket_mod.collision_proceeding(lane, accepted, interactive))
+        print()
+
     # A brand-new project gets the rest of a first-time setup, as `divide --confirm` does.
     if not paths.config_path(root).exists():
         save_config(config, root)
@@ -889,6 +930,31 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
     print(ticket_mod.describe(lane, created, widened))
     print()
     return lane
+
+
+def _interactive() -> bool:
+    """Whether there is a person at a terminal to answer a question."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ask_about_overlap() -> str:
+    """Proceed, share, or stop. A question, not an inference: the person knows the
+    product and lanekeeper does not."""
+    prompt = ("   Proceed anyway [p], write the shared zone and proceed [s], or stop [n]? "
+              "[p/s/N]: ")
+    try:
+        answer = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return "n"
+    if answer in ("p", "proceed", "y", "yes"):
+        return "p"
+    if answer in ("s", "share", "shared"):
+        return "s"
+    return "n"
 
 
 def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespace):
@@ -942,6 +1008,31 @@ def _open_desk(config: Config, worktree: Path, agent_id: str) -> int:
     return 0
 
 
+def _desk_notes(root: Path, worktree: Path) -> List[str]:
+    """What the person needs to know on arriving in the window `open` made.
+
+    Two things the window does not say for itself: the checkout has no dependencies
+    installed (#73), and the `lanekeeper` shim may not resolve there (#76). Both are
+    said only where the tool hands somebody to another window, so they stay noticed.
+    """
+    notes: List[str] = []
+    step = deps_mod.detect(root)
+    where = ticket_mod._short(worktree, root)
+    if step is not None:
+        if step.command:
+            notes.append(f"Once per worktree, install the dependencies — it is a fresh "
+                         f"checkout ({step.evidence} says how):")
+            notes.append(f"   cd {where} && {step.command}")
+        else:
+            notes.append(f"A fresh worktree has no dependencies installed; this project "
+                         f"has a {step.evidence} but no lockfile, so the install is your "
+                         f"call.")
+    fallback = fallback_line()
+    if fallback:
+        notes.append(fallback)
+    return notes
+
+
 def cmd_open(args: argparse.Namespace) -> int:
     """Opens an agent's worktree in the configured editor."""
     root = Path.cwd()
@@ -957,9 +1048,14 @@ def cmd_open(args: argparse.Namespace) -> int:
         return 1
     worktree = Path(agent.worktree_path)
     if not worktree.exists():
-        print(f"❌ Worktree {worktree} does not exist. Run 'lanekeeper doctor'.", file=sys.stderr)
+        print(f"❌ Worktree {worktree} does not exist. Run '{invocation()} doctor'.",
+              file=sys.stderr)
         return 1
-    return _open_desk(config, worktree, agent.id)
+    code = _open_desk(config, worktree, agent.id)
+    if code == 0:
+        for note in _desk_notes(root, worktree):
+            print(f"   {note}")
+    return code
 
 
 def cmd_install_gate(args: argparse.Namespace) -> int:
@@ -1789,6 +1885,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_spawn.add_argument("--force", action="store_true", help="Bypass max agent capacity check")
     p_spawn.add_argument("--open", action="store_true",
                          help="Open the new worktree in the configured editor")
+    p_spawn.add_argument("--accept-overlap", action="store_true",
+                         help="With --ticket: proceed without asking when another lane "
+                              "claims some of the same files")
     p_spawn.set_defaults(func=cmd_spawn)
 
     # `check --write-workflow` writes a file and checks nothing, which is not a name

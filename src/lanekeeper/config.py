@@ -47,6 +47,22 @@ class LaneConfig:
     #: permanent state that needs enforcing, so it gets a lane whose owner is nobody on
     #: purpose. A change touching it is escalated, not rejected as out-of-lane. #25.
     shared: bool = False
+    #: Where this lane came from, all optional and all absent by default so a
+    #: configuration written before they existed loads unchanged (#70). A lane used
+    #: to record only its name and its paths: nothing said which ticket it was for,
+    #: whether the paths were stated by the filer or proposed by a model and nodded
+    #: through, or whether the work was still going on. `ticket` is the tracker's own
+    #: reference — `2`, or a URL — written by `spawn --ticket` and `divide --confirm`
+    #: and never invented. `paths_from` mirrors `divide.models.PathSource`: `ticket`,
+    #: `flag` (a person's `--allow`) or `proposed` (an advisor's answer, accepted).
+    ticket: str = ""
+    paths_from: str = ""
+    #: A lane whose work is finished. Set by a person, never by the tool: a closed
+    #: ticket does not mean the lane is done, and silently narrowing enforcement is
+    #: the one failure the gate must not have. Retiring is bookkeeping — the collision
+    #: report and CODEOWNERS skip a retired lane, the gate's verdict for it is
+    #: unchanged, and nobody is spawned into it without being told.
+    retired: bool = False
 
 
 @dataclass
@@ -399,6 +415,9 @@ class Config:
                     # as it did before these existed.
                     **({"owner": list(lane.owner)} if lane.owner else {}),
                     **({"shared": True} if lane.shared else {}),
+                    **({"ticket": lane.ticket} if lane.ticket else {}),
+                    **({"paths_from": lane.paths_from} if lane.paths_from else {}),
+                    **({"retired": True} if lane.retired else {}),
                 }
                 for lane in self.lanes.values()
             ],
@@ -575,6 +594,12 @@ class Config:
 #: The lane name `check` uses for a change to the policy files. Not declarable.
 RESERVED_LANE_NAME = "policy"
 
+#: What `LaneConfig.paths_from` may say. The same three answers `divide` already
+#: distinguishes the moment a boundary is read; this keeps the distinction once
+#: written down, so a path argued over on a ticket and a path a model suggested at
+#: six in the evening do not render identically to whoever reads the file later.
+PATH_SOURCES = ("ticket", "flag", "proposed")
+
 
 class InvalidLaneError(ValueError):
     """Raised when a lane in the configuration cannot bound anything.
@@ -659,8 +684,21 @@ def _parse_lane(lane_name: str, raw: Any) -> LaneConfig:
         raise InvalidLaneError(
             f"Lane '{lane_name}': 'shared' must be true or false, not {shared!r}. "
             f"A shared lane is one nobody is spawned into.")
+    retired = raw.get("retired", False)
+    if not isinstance(retired, bool):
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': 'retired' must be true or false, not {retired!r}.")
+    paths_from = str(raw.get("paths_from") or "").strip().lower()
+    if paths_from and paths_from not in PATH_SOURCES:
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': 'paths_from' must be one of "
+            f"{', '.join(PATH_SOURCES)}, not {paths_from!r}. It records whether the "
+            f"paths were stated on the ticket, typed with --allow, or proposed by an "
+            f"advisor and accepted.")
+    ticket = raw.get("ticket")
     return LaneConfig(name=lane_name, allow=allow, deny=deny, shared=shared,
-                      owner=owner)
+                      owner=owner, retired=retired, paths_from=paths_from,
+                      ticket="" if ticket is None else str(ticket).strip())
 
 
 class InvalidIntakeSettingError(ValueError):

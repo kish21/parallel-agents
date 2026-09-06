@@ -128,7 +128,10 @@ class TestTheUncommittedPolicyIsCalledOut(RepoTestCase):
             name="feat-02", paths=("src/services/**",), source=ticket_mod.Source.TICKET,
             issue=TrackedIssue("2", "t"), policy_uncommitted=True)
         text = ticket_mod.next_steps(lane, gate_workflow_exists=True, base="main")
-        self.assertIn("Commit the policy here, on 'main'", text)
+        # Since #69 the sentence no longer names a protected branch as the place to
+        # commit; it still leads with the commit and still precedes the label line.
+        self.assertIn("Commit the policy", text)
+        self.assertIn("in this checkout", text)
         self.assertIn("git add .lanekeeper", text)
         self.assertLess(text.index("Commit the policy"), text.index("label it"))
 

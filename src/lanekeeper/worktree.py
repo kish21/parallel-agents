@@ -127,6 +127,20 @@ class WorktreeManager:
                 return candidate
         return "main"
 
+    def current_branch(self, cwd: Optional[Path] = None) -> str:
+        """The branch checked out at `cwd`, or "" when detached or unanswerable.
+
+        Read so that advice about committing can name the branch the person is
+        actually on. A message that always said `main` told somebody on `my-test` to
+        switch branches — and to commit to a branch the same file lists as protected.
+        """
+        try:
+            res = self._run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd, check=False)
+        except (GitError, OSError):
+            return ""
+        name = (res.stdout or "").strip() if res.returncode == 0 else ""
+        return "" if name in ("", "HEAD") else name
+
     @staticmethod
     def slugify(text: str) -> str:
         text = text.lower().strip()

@@ -138,7 +138,7 @@ class TestTheCommitWarningNamesTheRightCulprit(unittest.TestCase):
     def test_it_does_not_blame_the_agent(self):
         text = ticket_mod.next_steps(_lane(policy_uncommitted=True),
                                      gate_workflow_exists=True, base="main")
-        self.assertIn("Commit the policy here", text)
+        self.assertIn("Commit the policy", text)
         self.assertNotIn("agent's branch, and", text.split("denies it")[0])
         self.assertIn("git add .lanekeeper", text)
 
