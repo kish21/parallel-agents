@@ -20,8 +20,11 @@ desks (#41).
 low-level escape hatch for someone who already knows their lanes. Nobody on v0.6.0
 breaks.
 
-This document covers **step 1 only**. `start` ends after step 1 with an honest message
-naming what is not built yet. It does not pretend to do steps 2-7.
+This document covers **step 1 only**. When it was written, `start` ended here and said
+so. It now runs step 2 as well (see [start-step2-divide.md](start-step2-divide.md)) and
+then names the commands that follow — `spawn --ticket`, `install-gate`, and optionally
+`board`, `codeowners` and `open`. The steps after the division were never built as more
+automatic steps: they are those commands, run once per agent as you want each one.
 
 ## 2. Scope of this session
 

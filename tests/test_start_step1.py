@@ -165,12 +165,12 @@ class TestCoverage(StartTestCase):
         self.assertIn("I count 3 pieces of work", out)
         self.assertNotIn("every thing that document says", out)
 
-    def test_a_covered_backlog_passes_and_says_what_is_not_built_yet(self):
+    def test_a_covered_backlog_passes_and_names_what_to_run_next(self):
         (self.root / "PRODUCT.md").write_text(PRODUCT_MD, encoding="utf-8")
         code, out = self.run_start(GOOD_ISSUES)
         self.assertEqual(code, 0)
         self.assertIn("The work is written down", out)
-        self.assertIn("not built yet", out)
+        self.assertIn("spawn --ticket", out)
 
 
 class TestResumeAndSideEffects(StartTestCase):

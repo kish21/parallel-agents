@@ -614,6 +614,44 @@ lock is now taken only when `paths.home()` already exists.
 
 ---
 
+## Session of 2026-09-06 (second): the backlog closed, and the sentence that outlived it — v0.7.12
+
+The owner asked whether the last three issues should be worked or closed — covered
+already, or not required under the architecture as it now stands. Read against the
+record rather than from memory, the answer was: closed, but one code change had to land
+first or the tool would contradict the tracker.
+
+**The change.** `cmd_start` ended with "that part is not built yet (issues #33, #40,
+#41)". #40 and #41 shipped in v0.7.0. The sentence survived five releases telling people
+a feature did not exist while they had it installed. `start` now names what follows:
+`spawn --ticket`, `install-gate`, then `board` / `codeowners` / `open` as optional.
+`docs/start-step1-intake.md` and `docs/ticket-template.md` carried the same stale claim.
+
+**Why the three closed, in the words of the record rather than a summary:**
+
+- **#39 (dependency vs collision)** — its mechanical half was moved *forward into #38*
+  by the 2026-09-01 rewrite ("the mechanical collision check moves from step 3 into step
+  2 ... #39 keeps the harder question"), and shipped. `spawn --ticket` reports overlaps
+  today. What remained is inference over ticket prose, which the issue itself calls "a
+  weaker signal", and auto-proposing a fusion. That is a guesser whose answer the user
+  must confirm anyway, against a product rule that says lanekeeper *asks* rather than
+  guesses. #25 shipped the better of its two remedies (`shared: true`).
+- **#33 (how many agents)** — `spawn --ticket` answers "how many" by not asking. What
+  remained is renaming SR1/JR1 to Agent N, a breaking change to a schema now on PyPI,
+  whose own definition of done requires the old cards to keep loading. No run has been
+  blocked by seat names.
+- **#36 (the umbrella)** — steps 1, 2, 4, 6 and 7 are built; 3 and 5 are the two above.
+  The guided path exists and works; the steps after the division are commands, not
+  automation.
+
+**The honest risk, recorded so it is not lost:** `start` and `spawn --ticket` are now two
+doors into the same house, which is the thing #30's decision was meant to prevent. The
+getting-started guide leads with `spawn --ticket` and `start` is documented as the
+whole-backlog path. If a future session finds users confused by having both, deleting
+`start` is the cheaper fix than building steps 3 and 5.
+
+---
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use

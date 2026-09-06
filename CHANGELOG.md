@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.7.12] — 2026-09-06
+
+### Fixed
+
+- **`start` told people the board and the desks "are not built yet".** They were built
+  in v0.7.0 — `lanekeeper board`, `spawn --ticket`, `open` — and the sentence outlived
+  them by five releases, so the tool was telling somebody a feature did not exist while
+  they had it installed. `start` now ends by naming the commands that actually follow
+  the division: `spawn --ticket <number>` and `install-gate`, with `board`, `codeowners`
+  and `open` offered as optional. Two design docs carried the same stale claim and are
+  corrected.
+
+  The wording matters beyond the typo: what follows the division was never going to be
+  one more automatic step. It is one command per agent, run when you want that agent —
+  the shape the one-command path settled on, and the reason issues #33 and #39 are
+  closed rather than built.
+
 ## [v0.7.11] — 2026-09-06
 
 ### Fixed
