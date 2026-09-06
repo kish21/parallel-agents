@@ -89,3 +89,15 @@ class TestRepoFlag(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheSuggestionLooksLikeThePlatform(unittest.TestCase):
+    """#66: the root was suggested with forward slashes on Windows, in the one
+    message a person is meant to paste back."""
+
+    def test_the_suggested_root_uses_the_platforms_separator(self):
+        from pathlib import PureWindowsPath, PurePosixPath
+        from lanekeeper.cli import repo_root_suggestion
+        self.assertEqual(repo_root_suggestion(PureWindowsPath("C:/Users/k/mini")),
+                         "C:\\Users\\k\\mini")
+        self.assertEqual(repo_root_suggestion(PurePosixPath("/home/k/mini")), "/home/k/mini")

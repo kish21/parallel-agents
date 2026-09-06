@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import shutil
@@ -2023,10 +2024,60 @@ def cmd_declare(args: argparse.Namespace) -> int:
     return 0 if report.is_valid else 2
 
 
+#: The front door (#64). Twenty-two commands in registration order told a new user
+#: nothing about which to run first — `init`, the legacy escape hatch that writes
+#: technology-layer lanes, came fifth and `spawn` ninth. The whole adoption argument
+#: is "one command per ticket"; the place a person looks first has to say so.
+HELP_EPILOG = """\
+Most people need one command:
+
+  lanekeeper spawn --ticket 12     hand a ticket to an agent: a worktree, a branch,
+                                   ports, and the ticket's own file list as its
+                                   boundary. Writes the policy for you the first time.
+  lanekeeper install-gate          make the boundary enforceable on pull requests
+
+Working with agents:   status  open  check  allow  validate  diff  cleanup
+The whole backlog:     start  intake  divide  board
+Housekeeping:          doctor  repair  codeowners  uninit
+Without a tracker:     init    (writes lanes read from your folders; falls back to
+                                technology layers, which is not the split to keep)
+
+New here?  https://github.com/kish21/parallel-agents/blob/main/docs/getting-started.md
+"""
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, with one manner: a mistyped command names the nearest real one.
+
+    `spwan` used to get the full list of twenty-two choices and nothing else. Git says
+    "the most similar command is"; three lines of difflib do the same here.
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        if "invalid choice:" in message and self._subparsers is not None:
+            typed = message.split("invalid choice:", 1)[1].split("(", 1)[0].strip().strip("'\"")
+            choices: List[str] = []
+            for action in self._subparsers._group_actions:
+                choices.extend(getattr(action, "choices", {}) or [])
+            close = difflib.get_close_matches(typed, choices, n=3, cutoff=0.5)
+            if close:
+                self.print_usage(sys.stderr)
+                names = ", ".join(f"'{c}'" for c in close)
+                which = "The most similar command is" if len(close) == 1 \
+                    else "The most similar commands are"
+                self.exit(2, f"{self.prog}: error: '{typed}' is not a lanekeeper command. "
+                             f"{which} {names}.\n")
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="lanekeeper",
-        description="Lanekeeper — Mechanical Safety & Coordination Tool for AI Coding Agents",
+        description="Lanekeeper keeps parallel coding agents in their lanes: one worktree,\n"
+                    "one branch, one port range and one file boundary each, with a gate\n"
+                    "that fails a change which leaves its boundary.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # The first question asked of any installed CLI is which build is on the machine.
     # It reports the version of the distribution actually installed, not a literal.
@@ -2044,7 +2095,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repo", "-C", metavar="PATH", dest="repo_root", default=None,
         help="Run against this repository instead of the current directory")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>",
+                                       help="Command to run")
 
     # init
     # The guided entry point. `init` is unchanged and stays available for someone who
@@ -2311,8 +2363,18 @@ def enter_repo(path: str) -> Optional[str]:
         # Silently initialising one level down would produce a second, half-working
         # setup that the gate in CI never reads, and nothing would say why.
         return (f"--repo {path} is inside a repository but is not its root. "
-                f"Use --repo {top.as_posix()}")
+                f"Use --repo {repo_root_suggestion(top)}")
     return None
+
+
+def repo_root_suggestion(top) -> str:
+    """The repository root as the person would type it on this platform (#66).
+
+    `str()`, not `as_posix()`: a suggestion meant to be pasted should look like
+    what the person just typed, and on Windows that has backslashes. The posix form
+    is right for globs and for anything written into a file, which this is not.
+    """
+    return str(top)
 
 
 def main() -> None:
