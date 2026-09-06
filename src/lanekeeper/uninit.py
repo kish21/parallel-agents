@@ -282,7 +282,7 @@ def _remove_worktrees_and_branches(plan: UninitPlan,
     # The same rule as `cleanup` (#65): merged into the base, asked of git directly.
     # A branch that is pushed but not merged is kept, and the message says where its
     # commits are, because "pushed to origin" and "nowhere but here" are different risks.
-    base = worktree_mgr.get_default_branch()
+    base = worktree_mgr.merge_target()
     kept: List[str] = []
     deleted: List[str] = []
     for branch in plan.branches:

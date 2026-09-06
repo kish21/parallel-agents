@@ -133,7 +133,12 @@ def whereabouts(root: Path, worktree_dir: str = "") -> Whereabouts:
         for child in sorted(base.iterdir()) if base.is_dir() else []:
             found = read_lane_file(child / ".lane")
             if found:
-                rel = child.relative_to(root).as_posix()
+                try:
+                    rel = child.relative_to(root).as_posix()
+                except ValueError:
+                    # `worktree_dir` may point outside the repository; that is a
+                    # documented setting, not a reason for a check to fail.
+                    rel = str(child)
                 where.worktrees.append(
                     f"{found.get('AGENT_ID') or child.name} ({rel}, lane "
                     f"'{found.get('LANE', '?')}')")
@@ -222,9 +227,7 @@ def resolve_lane(explicit: str = "", labels_json: Optional[str] = None,
         found = lanes_from_labels_json(labels_json, label_prefix)
         if len(found) > 1:
             # Two lanes on one change is two changes, whatever the branch says.
-            raise NoLaneError(
-                f"This change carries {len(found)} lane labels ({', '.join(found)}). A "
-                f"change belongs to one lane; if it needs two, it is two changes.")
+            raise _too_many(found)
         labelled = found[0] if found else ""
     if labelled and derived and labelled != derived:
         raise NoLaneError(
@@ -244,19 +247,11 @@ def resolve_lane(explicit: str = "", labels_json: Optional[str] = None,
         raise NoLaneError(
             f"Say which lane this change belongs to: --lane <name>, --labels-json with "
             f"the pull request's labels, or --lane-from-branch.{hint}")
-    raise NoLaneError(
-        f"This change carries no '{label_prefix} <name>' label, so there is no lane to "
-        f"check it against. Add one label naming its lane.{hint}")
+    raise NoLaneError(f"{_no_label(label_prefix)}{hint}")
 
 
-def lanes_from_labels_json(raw: str, prefix: str = DEFAULT_LABEL_PREFIX) -> List[str]:
-    """Every lane the label list names, in order; none is an empty list, not an error."""
-    try:
-        labels = json.loads(raw)
-    except ValueError as e:
-        raise NoLaneError(f"The label list is not JSON: {e}") from e
-    if not isinstance(labels, list):
-        raise NoLaneError("The label list must be a JSON array of label names.")
+def lanes_from_labels(labels: List[str], prefix: str = DEFAULT_LABEL_PREFIX) -> List[str]:
+    """Every lane the labels name, in order. None is an empty list, not an error."""
     prefix = prefix.strip()
     found = []
     for label in labels:
@@ -268,40 +263,49 @@ def lanes_from_labels_json(raw: str, prefix: str = DEFAULT_LABEL_PREFIX) -> List
     return found
 
 
-def lane_from_labels(labels: List[str], prefix: str = DEFAULT_LABEL_PREFIX) -> str:
-    """The one lane a set of pull-request labels names.
-
-    Exactly one, because two lanes on one change means the change is two changes, and
-    none means the gate has nothing to check against. Both are refused with the reason.
-    """
-    prefix = prefix.strip()
-    lanes = []
-    for label in labels:
-        text = str(label).strip()
-        if text.lower().startswith(prefix.lower()):
-            name = text[len(prefix):].strip()
-            if name:
-                lanes.append(name)
-    if len(lanes) == 1:
-        return lanes[0]
-    if not lanes:
-        raise NoLaneError(
-            f"This change carries no '{prefix} <name>' label, so there is no lane to "
-            f"check it against. Add one label naming its lane.")
-    raise NoLaneError(
-        f"This change carries {len(lanes)} lane labels ({', '.join(lanes)}). A change "
-        f"belongs to one lane; if it needs two, it is two changes.")
-
-
-def lane_from_labels_json(raw: str, prefix: str = DEFAULT_LABEL_PREFIX) -> str:
-    """As `lane_from_labels`, from the JSON list the workflow passes in."""
+def lanes_from_labels_json(raw: str, prefix: str = DEFAULT_LABEL_PREFIX) -> List[str]:
+    """As `lanes_from_labels`, from the JSON list the workflow passes in."""
     try:
         labels = json.loads(raw)
     except ValueError as e:
         raise NoLaneError(f"The label list is not JSON: {e}") from e
     if not isinstance(labels, list):
         raise NoLaneError("The label list must be a JSON array of label names.")
-    return lane_from_labels([str(x) for x in labels], prefix)
+    return lanes_from_labels([str(x) for x in labels], prefix)
+
+
+def _no_label(prefix: str) -> NoLaneError:
+    return NoLaneError(
+        f"This change carries no '{prefix.strip()} <name>' label, so there is no lane to "
+        f"check it against. Add one label naming its lane.")
+
+
+def _too_many(lanes: Sequence[str]) -> NoLaneError:
+    """Two lanes on one change means the change is two changes."""
+    return NoLaneError(
+        f"This change carries {len(lanes)} lane labels ({', '.join(lanes)}). A change "
+        f"belongs to one lane; if it needs two, it is two changes.")
+
+
+def lane_from_labels(labels: List[str], prefix: str = DEFAULT_LABEL_PREFIX) -> str:
+    """The one lane a set of pull-request labels names.
+
+    Exactly one, because two lanes on one change means the change is two changes, and
+    none means the gate has nothing to check against. Both are refused with the reason.
+    `resolve_lane` is the same rule with the branch as a fallback for the second case.
+    """
+    lanes = lanes_from_labels(labels, prefix)
+    if len(lanes) == 1:
+        return lanes[0]
+    raise _no_label(prefix) if not lanes else _too_many(lanes)
+
+
+def lane_from_labels_json(raw: str, prefix: str = DEFAULT_LABEL_PREFIX) -> str:
+    """As `lane_from_labels`, from the JSON list the workflow passes in."""
+    lanes = lanes_from_labels_json(raw, prefix)
+    if len(lanes) == 1:
+        return lanes[0]
+    raise _no_label(prefix) if not lanes else _too_many(lanes)
 
 
 def check_files(config: Config, lane_name: str, files: List[str]) -> LaneValidationResult:
@@ -489,9 +493,9 @@ def annotations(report: CheckReport) -> List[str]:
     for err in report.errors:
         first = err.split("\n", 1)[0]
         path, sep, message = first.partition(": ")
-        if not sep or "/" not in path and "." not in path and not path:
-            continue
-        if " " in path.strip():
+        # A violation line starts with the path; a sentence does not. Whitespace in
+        # the would-be path means it was a sentence.
+        if not sep or not path.strip() or " " in path.strip():
             continue
         clean = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         out.append(f"::error file={path.strip()},title=Lane check::{clean}")

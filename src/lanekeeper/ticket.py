@@ -31,6 +31,7 @@ from .deps import DependencyStep
 from .divide import boundary, names
 from .divide.collision import patterns_intersect
 from .invocation import fallback_line, invocation
+from .lanes import LaneEngine
 from . import paths
 from .trackers.base import TrackedIssue
 
@@ -133,14 +134,31 @@ def collisions(config: Config, name: str, paths: Sequence[str]) -> List[Tuple[st
             for ours in paths:
                 if not patterns_intersect(theirs, ours):
                     continue
-                # An overlap a shared zone already covers is that zone doing its job,
-                # the same reading `divide.collision` makes. Without it, marking the
-                # file shared would leave the warning printed every time regardless.
-                if any(patterns_intersect(z, theirs) and patterns_intersect(z, ours)
-                       for z in zones):
+                # An overlap a shared zone already *covers* is that zone doing its job:
+                # without this, marking the file shared would leave the warning printed
+                # every time regardless. Covers, not merely touches — a zone holding
+                # one file inside `src/domain/**` settles that file, not the directory,
+                # and the review caught a first version that silenced the whole overlap.
+                if any(covers(z, contested_pattern(theirs, ours)) for z in zones):
                     continue
                 found.append((other, theirs, ours))
     return found
+
+
+def covers(zone: str, pattern: str) -> bool:
+    """Whether everything `pattern` could match is inside `zone`.
+
+    Exact for the shapes that occur: an identical pattern, a literal path inside a
+    zone glob, a directory glob under a wider directory glob. Anything else is not
+    covered, which errs towards reporting an overlap — the safe side of the guess.
+    """
+    if zone == pattern:
+        return True
+    if not any(c in pattern for c in "*?["):
+        return LaneEngine.match_glob(pattern, zone)
+    if zone.endswith("/**") and pattern.startswith(zone[:-2]):
+        return True
+    return False
 
 
 def ensure_lane(config: Config, root: Path, lane: TicketLane) -> Tuple[bool, List[str]]:

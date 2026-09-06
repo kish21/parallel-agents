@@ -226,3 +226,38 @@ class TestSpawnLooksAtTheRemoteFirst(RemoteTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestABaseThatDoesNotResolve(unittest.TestCase):
+    """The review's finding: a repository whose trunk is `develop` has no `main`, and
+    `get_default_branch` falls back to the literal — against which every branch reads
+    as unmerged. The branch checked out is then the base, as `git branch -d` had it."""
+
+    def test_a_merged_branch_is_still_deleted_and_the_real_base_named(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        _git(root, "init", "-q", "-b", "develop", ".")
+        _git(root, "config", "user.email", "t@t.c")
+        _git(root, "config", "user.name", "t")
+        (root / "a").write_text("x", encoding="utf-8")
+        cfg = Config.default("p")
+        cfg.capability_gates = {}
+        cfg.lanes = {"l": LaneConfig("l", allow=["**"])}
+        cfg.git.protected_branches = ["develop"]
+        save_config(cfg, root)
+        _git(root, "add", "-A")
+        _git(root, "commit", "-qm", "init")
+        mgr = WorktreeManager(root)
+        self.assertEqual(mgr.merge_target(), "develop")
+        res = run_cli(["spawn", "--lane", "l", "--task", "t"], cwd=root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        wt = root / ".lanekeeper" / "worktrees" / "agent-001"
+        (wt / "b").write_text("y", encoding="utf-8")
+        _git(wt, "add", "-A")
+        _git(wt, "commit", "-qm", "work")
+        branch = _git(wt, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        _git(root, "merge", "-q", branch)
+        res = run_cli(["cleanup", "agent-001", "--force"], cwd=root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn(f"Deleted branch {branch} (merged into develop)", res.stdout)
+        self.assertFalse(mgr.branch_exists(branch))

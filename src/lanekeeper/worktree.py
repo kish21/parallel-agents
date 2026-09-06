@@ -241,7 +241,10 @@ class WorktreeManager:
         resolved_path = (self.root_dir / target_path).resolve()
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
-        base = base_ref or self.get_default_branch()
+        # `merge_target`, not `get_default_branch`: the latter falls back to the
+        # literal `main` when nothing says otherwise, and on a repository whose trunk
+        # is `develop` that made every spawn fail with "invalid reference: main".
+        base = base_ref or self.merge_target()
 
         if self.branch_exists(branch_name):
             # Check out existing branch
@@ -382,6 +385,26 @@ class WorktreeManager:
     def prune(self) -> None:
         self._run_git(["worktree", "prune"], check=False)
 
+    def ref_exists(self, ref: str) -> bool:
+        res = self._run_git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                            check=False)
+        return res.returncode == 0
+
+    def merge_target(self) -> str:
+        """The branch agent work is merged into, as far as this clone can tell.
+
+        The default branch when it resolves. When it does not — a repository whose
+        trunk is `develop` with no `origin/HEAD` to say so — `get_default_branch`'s
+        literal fallback of `main` names nothing, and `merge-base` against it would
+        call every branch unmerged. The branch checked out here is then the best
+        available answer, which is what `git branch -d` compared against before.
+        """
+        default = self.get_default_branch()
+        if self.ref_exists(default):
+            return default
+        current = self.current_branch()
+        return current or "HEAD"
+
     def branch_is_merged(self, branch_name: str, base: str) -> bool:
         """Whether every commit on the branch is already on `base`.
 
@@ -433,7 +456,7 @@ class WorktreeManager:
         unmerged, or checked out in a worktree — so the caller says so."""
         if not self.branch_exists(branch_name):
             return False
-        if not force and not self.branch_is_merged(branch_name, base or self.get_default_branch()):
+        if not force and not self.branch_is_merged(branch_name, base or self.merge_target()):
             return False
         # `-D`, because `-d` would consult the upstream and say yes to a pushed branch;
         # the question that matters was answered above.

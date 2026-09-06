@@ -410,3 +410,26 @@ class TestMarkShared(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestASharedZoneSettlesOnlyWhatItCovers(unittest.TestCase):
+    """The review's finding: a zone holding one file inside `src/domain/**` must not
+    silence an overlap over the whole directory."""
+
+    def test_covers(self):
+        self.assertTrue(ticket_mod.covers("src/domain/contracts.ts", "src/domain/contracts.ts"))
+        self.assertTrue(ticket_mod.covers("src/domain/**", "src/domain/contracts.ts"))
+        self.assertTrue(ticket_mod.covers("src/**", "src/domain/**"))
+        self.assertFalse(ticket_mod.covers("src/domain/contracts.ts", "src/domain/**"))
+        self.assertFalse(ticket_mod.covers("src/other/**", "src/domain/**"))
+
+    def test_a_narrow_zone_inside_a_wide_overlap_does_not_silence_it(self):
+        cfg = Config.default("p")
+        cfg.lanes = {
+            "domain": LaneConfig("domain", allow=["src/domain/**"]),
+            "zone": LaneConfig("zone", allow=["src/domain/contracts.ts"], shared=True),
+        }
+        found = ticket_mod.collisions(cfg, "feat-04", ["src/domain/**"])
+        self.assertEqual(found, [("domain", "src/domain/**", "src/domain/**")])
+        # But the file the zone holds is settled.
+        self.assertEqual(ticket_mod.collisions(cfg, "feat-04", ["src/domain/contracts.ts"]), [])

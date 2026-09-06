@@ -815,6 +815,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         branch_name = outcome[1]
         agent.branch = branch_name
         state_mgr.save_agent(agent)
+    fetch_from = outcome[1] if outcome[0] == "continue" else None
 
     # Phase 2: create the worktree under the dedicated git lock, then do the rest
     # unlocked. Concurrent `git worktree add` against one repository races on refs and the
@@ -832,6 +833,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             )
         print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
         with state_mgr.git_lock():
+            if fetch_from:
+                worktree_mgr.fetch_branch(branch_name, fetch_from)
             resolved_path = worktree_mgr.create_worktree(target_path_for(root, config, agent_id), branch_name)
         agent.worktree_path = str(resolved_path)
         env_mgr.write_agent_environment(resolved_path, agent)
@@ -917,10 +920,13 @@ def _reconcile_remote_branch(worktree_mgr: WorktreeManager, branch_name: str,
         return ("ok", "")
     choice = (getattr(args, "remote_branch", None) or "").strip().lower()
     if choice == "continue":
-        worktree_mgr.fetch_branch(branch_name, lookup.remote)
         print(f"↩️  Continuing the work on {lookup.remote}/{branch_name} ({sha[:10]}): the "
               f"worktree starts from it.")
-        return ("ok", "")
+        # The fetch writes refs, so it happens under the git lock with the worktree
+        # creation, not here: this function runs unlocked because it talks to the
+        # network, and a ref write racing another spawn's `worktree add` is the
+        # "cannot lock ref" failure the lock exists to prevent.
+        return ("continue", lookup.remote)
     if choice == "rename":
         fresh = _free_branch_name(branch_name, lookup.branches, worktree_mgr)
         print(f"🔀 Branch '{branch_name}' already exists on {lookup.remote}; this agent "
@@ -1088,7 +1094,6 @@ def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespac
         print(f"❌ Claude Code could not name any files in this project for ticket "
               f"#{issue.ref}. Say them yourself with --allow.", file=sys.stderr)
         return None
-    widened = dict(proposal.widened)
     by_glob = {}
     for original, glob in proposal.widened:
         by_glob.setdefault(glob, []).append(original)
@@ -1101,7 +1106,6 @@ def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespac
                   f"exist yet)")
         else:
             print(f"     {p}")
-    del widened
     allow_line = " ".join(f"--allow '{p}'" for p in found)
     if getattr(args, "yes", False):
         return tuple(found)
@@ -1377,6 +1381,13 @@ def _allow_refusal(config: Config, lane: LaneConfig, path: str) -> str:
             LaneEngine.match_glob(path, p) for p in check_mod.policy_lane_paths(config)):
         return ("this is a policy file. No lane may own it; a change to it is made under "
                 "the 'policy' lane, by a person.")
+    for pattern in lane.deny:
+        if LaneEngine.match_glob(path, pattern) or patterns_intersect(pattern, path):
+            # `deny` beats `allow` in the engine, so appending here would report a
+            # decision that has no effect. A carve-out was written on purpose.
+            return (f"lane '{lane.name}' denies it (matched '{pattern}'), and deny beats "
+                    f"allow. That carve-out was written on purpose; remove it in "
+                    f"{paths.display_config_path()} if it no longer holds.")
     for zone in LaneEngine.shared_lanes(config):
         if zone.name != lane.name and LaneEngine.claims(path, zone):
             return (f"this is in the shared zone '{zone.name}', which belongs to no lane on "
@@ -1966,7 +1977,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     # pull request, and "fully merged" was then said about work nobody had merged.
     branch_note = ""
     if agent.branch:
-        base = worktree_mgr.get_default_branch()
+        base = worktree_mgr.merge_target()
         if worktree_mgr.delete_branch(agent.branch, base=base):
             branch_note = f"   Deleted branch {agent.branch} (merged into {base})."
         elif worktree_mgr.branch_exists(agent.branch):

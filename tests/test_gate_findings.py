@@ -487,3 +487,33 @@ class TestAllowClosesTheLoopInsideAWorktree(CheckoutTestCase):
         res = self._check("--lane", "feat-02", cwd=wt)
         self.assertEqual(res.returncode, 0, output_of(res))
         self.assertNotIn("Reading the policy from the main checkout", res.stdout)
+
+
+class TestTheReviewFindings(CheckoutTestCase):
+    """What the code review of v0.8.0 found, each reproduced before it was fixed."""
+
+    def test_allow_refuses_a_path_the_lane_itself_denies(self):
+        cfg = load_config(self.tmp)
+        cfg.lanes["feat-02"].deny = ["src/checkout/secret/**"]
+        save_config(cfg, self.tmp)
+        res = run_cli(["allow", "--lane", "feat-02", "src/checkout/secret/key.ts"], cwd=self.tmp)
+        self.assertEqual(res.returncode, 1, output_of(res))
+        self.assertIn("deny beats allow", res.stderr)
+        self.assertNotIn("src/checkout/secret/key.ts", load_config(self.tmp).lanes["feat-02"].allow)
+
+    def test_a_worktree_dir_outside_the_repository_does_not_crash_the_check(self):
+        outside = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        (outside / "agent-001").mkdir()
+        (outside / "agent-001" / ".lane").write_text("LANE='feat-02'\nAGENT_ID='agent-001'\n",
+                                                     encoding="utf-8")
+        where = check.whereabouts(self.tmp, str(outside))
+        self.assertEqual(len(where.worktrees), 1)
+        self.assertIn("agent-001", where.worktrees[0])
+
+    def test_the_no_label_refusal_has_one_source(self):
+        with self.assertRaises(check.NoLaneError) as a:
+            check.lane_from_labels(["bug"])
+        with self.assertRaises(check.NoLaneError) as b:
+            check.resolve_lane(labels_json='["bug"]', branch="my-test", lanes=["x"])
+        self.assertEqual(str(a.exception), str(b.exception))
