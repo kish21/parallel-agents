@@ -80,15 +80,22 @@ class StateManager:
         """Serialises reads and writes of the JSON state files."""
         return StateLock(self.state_dir)
 
-    def git_lock(self) -> StateLock:
+    def git_lock(self, timeout_seconds: float = 120.0) -> StateLock:
         """Serialises repository-mutating git commands (worktree and branch creation).
 
         Deliberately a *different* lock file from ``lock()``. Git worktree creation
         mutates shared repository state (refs, the index, .git/worktrees) and is not safe
         to run concurrently against one repository, but it is slow — holding the state
         lock across it would block every `status` and `validate` for its duration.
+
+        The timeout is settable because the callers want different things from a lock
+        that is already held: a spawn or a cleanup should wait for the worktree it is
+        about to change, while `doctor` should give up quickly and say so — a diagnostic
+        that hangs for two minutes is a worse diagnostic than one that reports a busy
+        repository.
         """
-        return StateLock(self.state_dir, lock_name=".git.lock", timeout_seconds=120.0)
+        return StateLock(self.state_dir, lock_name=".git.lock",
+                         timeout_seconds=timeout_seconds)
 
     def _ensure_storage(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
