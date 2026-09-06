@@ -77,6 +77,12 @@ class IssueTracker(ABC):
         Raises `TrackerError` if reading fails after `is_available` said it would work.
         """
 
+    def pull_request_for_branch(self, branch: str) -> Optional[str]:
+        """A short description of the open pull request whose head is `branch`, or
+        None when there is none or the tracker cannot say. Used only to make a refusal
+        more useful (#78); a tracker that cannot answer answers None."""
+        return None
+
     def get_issue(self, ref: str) -> Optional[TrackedIssue]:
         """One piece of work by its own identifier, or None if the tracker has none.
 

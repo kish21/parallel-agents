@@ -795,6 +795,26 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     first_worktree = not any(
         a.id != agent_id for a in state_mgr.list_agents())
 
+    # Phase 1b: what does the remote know about this branch name (#78)? This is the
+    # last cheap moment — everything after it is work the person may lose at `git
+    # push`, where git's own hint (`git pull`) would merge an open pull request's
+    # history into two lines of new work. A remote that cannot be reached is a
+    # printed note and the spawn proceeds; a branch that exists is refused with the
+    # three ways forward, and nothing is picked on the person's behalf.
+    try:
+        outcome = _reconcile_remote_branch(worktree_mgr, branch_name, args, config, root)
+    except Exception as e:
+        outcome = ("stop", f"could not look at the remote: {e}")
+    if outcome[0] == "stop":
+        port_mgr.release_ports(agent_id)
+        state_mgr.remove_agent(agent_id)
+        print(f"❌ {outcome[1]}", file=sys.stderr)
+        return 1
+    if outcome[0] == "renamed":
+        branch_name = outcome[1]
+        agent.branch = branch_name
+        state_mgr.save_agent(agent)
+
     # Phase 2: create the worktree under the dedicated git lock, then do the rest
     # unlocked. Concurrent `git worktree add` against one repository races on refs and the
     # index, so it must be serialised — but only against other git operations, not against
@@ -868,6 +888,76 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         return open_code
     print(f"\nTo open:     {inv} open {agent_id}")
     return 0
+
+
+def _reconcile_remote_branch(worktree_mgr: WorktreeManager, branch_name: str,
+                             args: argparse.Namespace, config: Config, root: Path):
+    """("ok" | "renamed" | "stop", detail). See the call site and issue #78.
+
+    `--remote-branch continue` fetches the remote branch so the worktree resumes it;
+    `rename` takes the next free name lanekeeper proposes; `ignore` proceeds under the
+    same name, deliberately, and says what that means. Without the flag, an existing
+    remote branch stops the spawn — never silently resolved in either direction:
+    branching from the remote head would smuggle unreviewed work into a new lane, and
+    renaming would leave two branches for one ticket with no explanation.
+    """
+    if worktree_mgr.branch_exists(branch_name):
+        # A local branch of that name is checked out as it is — the existing behaviour
+        # for a re-spawn — and the remote question does not arise.
+        return ("ok", "")
+    lookup = worktree_mgr.remote_branches(f"{branch_name}*")
+    if not lookup.available:
+        if lookup.error:
+            print(f"ℹ️  Could not ask {lookup.remote} whether '{branch_name}' already exists "
+                  f"there ({lookup.error}); carrying on without knowing.")
+        return ("ok", "")
+    sha = lookup.sha(branch_name)
+    if sha is None:
+        return ("ok", "")
+    choice = (getattr(args, "remote_branch", None) or "").strip().lower()
+    if choice == "continue":
+        worktree_mgr.fetch_branch(branch_name, lookup.remote)
+        print(f"↩️  Continuing the work on {lookup.remote}/{branch_name} ({sha[:10]}): the "
+              f"worktree starts from it.")
+        return ("ok", "")
+    if choice == "rename":
+        fresh = _free_branch_name(branch_name, lookup.branches, worktree_mgr)
+        print(f"🔀 Branch '{branch_name}' already exists on {lookup.remote}; this agent "
+              f"works on '{fresh}' instead.")
+        return ("renamed", fresh)
+    if choice == "ignore":
+        print(f"⚠️  Proceeding on '{branch_name}' although {lookup.remote} already has a "
+              f"branch of that name at {sha[:10]} (--remote-branch ignore). The first "
+              f"push will be rejected as non-fast-forward; do not 'git pull' the old "
+              f"history into this work by reflex.")
+        return ("ok", "")
+    pr = None
+    try:
+        pr = get_tracker(config.intake, root).pull_request_for_branch(branch_name)
+    except Exception:
+        pr = None
+    lines = [
+        f"Branch '{branch_name}' already exists on {lookup.remote} at {sha[:10]}"
+        + (f", and it is the head of {pr}" if pr else "") + ".",
+        f"   Starting new work under that name would collide at 'git push', after the "
+        f"work is done. Three ways forward — your call, not mine:",
+        f"     --remote-branch continue   fetch it and carry on from where it stopped",
+        f"     --remote-branch rename     start fresh as "
+        f"'{_free_branch_name(branch_name, lookup.branches, worktree_mgr)}'",
+        f"     --remote-branch ignore     use the same name anyway, knowingly",
+        f"   Nothing was created.",
+    ]
+    return ("stop", "\n".join(lines))
+
+
+def _free_branch_name(branch_name: str, remote: dict, worktree_mgr: WorktreeManager) -> str:
+    """`<name>-2`, `-3`, …: the first name neither the remote nor this clone holds."""
+    n = 2
+    while True:
+        candidate = f"{branch_name}-{n}"
+        if candidate not in remote and not worktree_mgr.branch_exists(candidate):
+            return candidate
+        n += 1
 
 
 def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
@@ -1830,13 +1920,17 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
                 f"A suggestion, and the edit is yours: the collision report and "
                 f"CODEOWNERS then skip it; the gate does not change.")
 
+    # Deleted only when merged into the base branch — asked of git directly, never
+    # inferred from `git branch -d` (#65): that flag says yes to a branch whose upstream
+    # holds its commits, which is the normal end state of an agent's work with an open
+    # pull request, and "fully merged" was then said about work nobody had merged.
     branch_note = ""
     if agent.branch:
-        if worktree_mgr.delete_branch(agent.branch):
-            branch_note = f"   Deleted branch {agent.branch} (fully merged)."
+        base = worktree_mgr.get_default_branch()
+        if worktree_mgr.delete_branch(agent.branch, base=base):
+            branch_note = f"   Deleted branch {agent.branch} (merged into {base})."
         elif worktree_mgr.branch_exists(agent.branch):
-            branch_note = (f"   Kept branch {agent.branch}: it has commits nobody has merged. "
-                           f"Delete it yourself with 'git branch -D' when you are sure.")
+            branch_note = "   " + worktree_mgr.describe_kept_branch(agent.branch, base)
 
     # 3. Release ports, and say so when one is still being served. A reservation can be
     # withdrawn from the ledger, but a process nobody recorded a PID for cannot be, and
@@ -2045,6 +2139,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_spawn.add_argument("--force", action="store_true", help="Bypass max agent capacity check")
     p_spawn.add_argument("--open", action="store_true",
                          help="Open the new worktree in the configured editor")
+    p_spawn.add_argument("--remote-branch", choices=["continue", "rename", "ignore"],
+                         default=None,
+                         help="When the branch name already exists on the remote: "
+                              "continue that work, start fresh under a new name, or "
+                              "use the name anyway")
     p_spawn.add_argument("--accept-overlap", action="store_true",
                          help="With --ticket: proceed without asking when another lane "
                               "claims some of the same files")

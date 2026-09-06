@@ -5,13 +5,28 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 
 class GitError(RuntimeError):
     """Raised when a Git command fails or violates safety rules."""
+
+
+@dataclass
+class RemoteLookup:
+    """The answer to "what does the remote know about this branch name"."""
+
+    remote: str
+    #: False when there is no such remote, or it could not be reached (see `error`).
+    available: bool
+    error: str = ""
+    #: Branch name → commit sha, for every remote branch matching the pattern asked.
+    branches: dict = field(default_factory=dict)
+
+    def sha(self, branch_name: str) -> Optional[str]:
+        return self.branches.get(branch_name)
 
 
 @dataclass
@@ -69,6 +84,7 @@ class WorktreeManager:
         args: List[str],
         cwd: Optional[Path] = None,
         check: bool = True,
+        timeout: Optional[float] = None,
     ) -> subprocess.CompletedProcess[str]:
         target_cwd = cwd or self.root_dir
         try:
@@ -80,7 +96,11 @@ class WorktreeManager:
                 encoding="utf-8",
                 errors="replace",
                 check=check,
+                timeout=timeout,
             )
+        except subprocess.TimeoutExpired as e:
+            raise GitError(
+                f"Git command timed out after {timeout:.0f}s ('git {' '.join(args)}')") from e
         except subprocess.CalledProcessError as e:
             # Git writes progress ("Preparing worktree...") to stderr alongside the real
             # error, so keep every line: truncating to one hid the actual cause.
@@ -362,11 +382,96 @@ class WorktreeManager:
     def prune(self) -> None:
         self._run_git(["worktree", "prune"], check=False)
 
-    def delete_branch(self, branch_name: str, force: bool = False) -> bool:
-        """Deletes a local branch. Returns False when git refuses — an unmerged branch
-        without `force` — so the caller can say the work was kept, not lost."""
+    def branch_is_merged(self, branch_name: str, base: str) -> bool:
+        """Whether every commit on the branch is already on `base`.
+
+        Asked directly — `git merge-base --is-ancestor` — rather than inferred from
+        `git branch -d`'s exit code (#65). `-d`'s documented rule is "fully merged in
+        its upstream branch, or in HEAD if no upstream was set". A branch pushed with
+        `-u` therefore had an upstream identical to itself and git agreed to delete it;
+        lanekeeper then reported "fully merged", which is not what had been established.
+        Nothing had checked the branch against the base at all. The test suite never
+        saw it because no test ever pushed to a remote.
+        """
+        res = self._run_git(["merge-base", "--is-ancestor", branch_name, base], check=False)
+        return res.returncode == 0
+
+    def branch_upstream(self, branch_name: str) -> Optional[str]:
+        """The branch's upstream (`origin/x`), or None when it has none."""
+        res = self._run_git(
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", f"{branch_name}@{{upstream}}"],
+            check=False)
+        name = (res.stdout or "").strip()
+        return name if res.returncode == 0 and name else None
+
+    def branch_is_pushed(self, branch_name: str) -> Optional[bool]:
+        """Whether every commit on the branch is on its upstream; None without one."""
+        upstream = self.branch_upstream(branch_name)
+        if upstream is None:
+            return None
+        return self.branch_is_merged(branch_name, upstream)
+
+    def describe_kept_branch(self, branch_name: str, base: str) -> str:
+        """Why a branch was kept, with the fact that decides its risk: where its
+        commits are. "Pushed to origin" and "not pushed anywhere" carry very different
+        risk and used to be indistinguishable."""
+        pushed = self.branch_is_pushed(branch_name)
+        if pushed:
+            return (f"Kept branch {branch_name}: not merged into {base}. Its commits are "
+                    f"pushed to {self.branch_upstream(branch_name)}.")
+        if pushed is False:
+            return (f"Kept branch {branch_name}: not merged into {base}, and not every "
+                    f"commit on it is on {self.branch_upstream(branch_name)}. Push it, or "
+                    f"delete it yourself with 'git branch -D' when you are sure.")
+        return (f"Kept branch {branch_name}: not merged into {base}, and not pushed "
+                f"anywhere. Delete it yourself with 'git branch -D' when you are sure.")
+
+    def delete_branch(self, branch_name: str, force: bool = False,
+                      base: Optional[str] = None) -> bool:
+        """Deletes a local branch when it is merged into `base` (the default branch
+        unless given), or unconditionally with `force`. Returns False when it was kept —
+        unmerged, or checked out in a worktree — so the caller says so."""
         if not self.branch_exists(branch_name):
             return False
-        flag = "-D" if force else "-d"
-        res = self._run_git(["branch", flag, branch_name], check=False)
+        if not force and not self.branch_is_merged(branch_name, base or self.get_default_branch()):
+            return False
+        # `-D`, because `-d` would consult the upstream and say yes to a pushed branch;
+        # the question that matters was answered above.
+        res = self._run_git(["branch", "-D", branch_name], check=False)
         return res.returncode == 0
+
+    def has_remote(self, remote: str = "origin") -> bool:
+        res = self._run_git(["remote", "get-url", remote], check=False)
+        return res.returncode == 0
+
+    def remote_branches(self, pattern: str, remote: str = "origin",
+                        timeout: float = 15.0) -> "RemoteLookup":
+        """What the remote holds under `refs/heads/<pattern>` (#78).
+
+        `git ls-remote` needs no GitHub API, no token and no `gh`. It does need the
+        network, so it gets a timeout and a failure is a *note*, never an error: this
+        is a convenience check, and the gate does not depend on it.
+        """
+        if not self.has_remote(remote):
+            return RemoteLookup(remote=remote, available=False, error="")
+        try:
+            res = self._run_git(["ls-remote", "--heads", remote, f"refs/heads/{pattern}"],
+                                check=False, timeout=timeout)
+        except GitError as e:
+            return RemoteLookup(remote=remote, available=False, error=str(e))
+        if res.returncode != 0:
+            return RemoteLookup(remote=remote, available=False,
+                                error=(res.stderr or "").strip().splitlines()[-1:][0]
+                                if (res.stderr or "").strip() else f"exit {res.returncode}")
+        found = {}
+        for line in (res.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].startswith("refs/heads/"):
+                found[parts[1][len("refs/heads/"):]] = parts[0]
+        return RemoteLookup(remote=remote, available=True, branches=found)
+
+    def fetch_branch(self, branch_name: str, remote: str = "origin") -> None:
+        """Brings a remote branch down as a local branch of the same name, tracking it."""
+        self._run_git(["fetch", remote, f"{branch_name}:{branch_name}"])
+        self._run_git(["branch", f"--set-upstream-to={remote}/{branch_name}", branch_name],
+                      check=False)
