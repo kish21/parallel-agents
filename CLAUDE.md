@@ -3,7 +3,7 @@
 Project instructions and build state. Read this first; it exists so each session stops
 re-deriving the same decisions from the issue tracker.
 
-Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.2.
+Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.12; v0.8.0 is in PR.
 
 ---
 
@@ -649,6 +649,56 @@ doors into the same house, which is the thing #30's decision was meant to preven
 getting-started guide leads with `spawn --ticket` and `start` is documented as the
 whole-backlog path. If a future session finds users confused by having both, deleting
 `start` is the cheaper fix than building steps 3 and 5.
+
+---
+
+## Session of 2026-09-06 (third): the nineteen deep-test issues — v0.8.0
+
+The owner ran the deep-test protocol against published 0.7.12 on Windows and filed
+#62–#80, then asked for all of them to be fixed while away. **The gate was never
+wrong.** Nineteen issues, one PR, grouped by the file they live in; each group has a
+test file that fails against 0.7.12 (`test_deep_test_findings`, `test_gate_findings`,
+`test_config_findings`, `test_remote_findings`, `test_help_findings`) and the CHANGELOG
+`[v0.8.0]` entry says what each does. Things worth knowing beyond that:
+
+- **Two blind spots, not nineteen bugs.** The tool never looked at the remote (#65,
+  #78 — `git branch -d` says yes to a pushed branch; a branch name already on origin
+  surfaced at `git push`), and it never said which checkout it had looked at (#77,
+  #76, #67 — `open` puts a second identical window on screen and the tool did not
+  track which one the person was in). Everything else is the tool knowing an answer
+  and making the person work it out (#62, #64, #72, #73, #80).
+- **`check` inside a worktree now reads the main checkout's policy whenever the two
+  differ**, saying so. Found while capturing real output for the guide, not by a
+  test: `allow` widened the main checkout's policy and `check` in the worktree kept
+  reading its own committed copy, so the #62 loop did not close in the realistic
+  case. The main checkout's copy is the one CI reads once committed (the gate checks
+  the merge commit), so the local check reads it too. Silent when they match.
+- **`config.yaml` is written minimally (#68), always.** The baseline is
+  `Config.from_dict({})` — what a *missing* key loads as — not `Config.default()`,
+  which carries port ranges and gates a missing key does not restore. An exhaustive
+  file shrinks the next time lanekeeper writes it, which is a one-time large diff in
+  somebody's policy PR; judged acceptable and recorded here. Values that differ,
+  including an old default, are kept because nothing can tell a choice from a stale
+  default.
+- **The lane in a branch name is matched against the declared lanes (#72)**, not
+  parsed: `parallel/agent-001/2-feat-02-automated-…` cannot say where `feat-02` ends
+  without the list. Longest declared name wins. A hand-made branch yields nothing.
+- **The invocation form (#76)** is `lanekeeper` unless `sys.argv[0]` is `cli.py`, in
+  which case it is `<interpreter as typed> -m lanekeeper.cli`. `LANEKEEPER_INVOCATION`
+  overrides — the README's PowerShell wrapper function runs the module form while the
+  person types the shim — and the test harness sets it to `lanekeeper`, so every
+  subprocess test asserts what a shim user sees.
+- **Three subagents were used** for the isolated files (#75 boundary, #74 template,
+  #71 advisor) and were killed by an interruption mid-session; the first two had
+  finished, the third had written its tests and no code. Working in one checkout
+  meant an early `git add -A src tests` swept their in-progress files into an
+  unrelated commit — cosmetic under squash-merge, but add files by name next time.
+- **Not done, and still the same clause:** `board` and `codeowners` against live
+  GitHub; the gate's `--github` summary and annotations have been observed only as a
+  file and stdout lines, not on a real run page. `--remote-branch continue` and the
+  `gh pr list` lookup ran only against a bare repository and a stand-in `gh`.
+
+**Open after this:** nothing, once #62–#80 close with the PR.
 
 ---
 

@@ -10,6 +10,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.8.0] — 2026-09-06
+
+The owner ran the deep-test protocol against published 0.7.12 and filed nineteen
+issues (#62–#80). The gate was never wrong. Everything below is what the tool said,
+failed to say, or did around it — plus two holes in what it knew: it never looked at
+the remote, and it never said which checkout it had looked at. All nineteen are in this
+release. Minor version, because `config.yaml` gains fields and the CLI gains a command.
+
+### Added
+
+- **`lanekeeper allow <path> --lane <name>`** (#62). The gate names the file it
+  blocked; this records the one decision the gate cannot make — *yes, that file belongs
+  to this lane* — without hand-editing YAML. Inside an agent's worktree the lane
+  defaults to the worktree's own and the policy in the main checkout is what changes.
+  It refuses a path another lane already claims (naming it), the policy files, and
+  shared zones, and it never widens a lane on its own. `check` and `validate` offer
+  the exact command on every out-of-lane line. Capturing real output for the guide
+  found the loop still open in the realistic case — the worktree carried a committed
+  policy and `check` read that copy — so `check` inside a worktree now reads the main
+  checkout's policy whenever the two differ, and says so.
+- **`generated:`** in `config.yaml` (#63): paths a build writes, which `check`,
+  `validate` and `diff` leave out in every lane and say so. Empty by default. It lives
+  in the policy, so an agent cannot exempt a file from inside its own pull request —
+  pinned — and the policy files themselves can never be declared generated.
+- **`check --lane-from-branch`** (#72). A branch `spawn` made carries its lane in its
+  name; matched against the declared lanes, the gate reads it when no label is
+  present. A label still wins; a label that disagrees with the branch fails naming
+  both — the mislabelled pull request, the one case the tool can catch; a hand-made
+  branch yields nothing and the fail-closed refusal stands. The no-label refusal names
+  the branch-derived candidate. The generated workflow passes `github.head_ref` and
+  turns the flag on.
+- **`check --github`** (#79) writes the verdict to `$GITHUB_STEP_SUMMARY` on pass and
+  fail and annotates each blocked file on the Files tab with `::error file=`. Local
+  output without the flag is unchanged; the exit code never depends on it.
+- **`spawn --ticket` looks at the remote before making a branch** (#78). `git ls-remote
+  --heads` with a timeout; a name the remote already holds stops the spawn with the
+  sha, the open pull request when `gh` can say, and three ways forward — `--remote-branch
+  continue | rename | ignore` — none picked for the person. An unreachable remote is a
+  note and the spawn proceeds; no remote says nothing. The reservation is rolled back.
+- **`spawn --ticket` asks about an overlap before writing anything** (#80). The
+  collision report is printed before the lane goes into the policy and before a
+  worktree exists; it says both lanes allow the file and both agents' checks will pass;
+  it names `shared: true` with the exact edit; on a terminal it asks — proceed, write
+  the shared zone, or stop — and off one it proceeds with the warning.
+  `--accept-overlap` for the deliberate case. Shared and retired lanes are left out of
+  the report, and an overlap a shared zone already covers is not reported.
+- **A lane records its provenance** (#70): `ticket:`, `paths_from: ticket | flag |
+  proposed`, and `retired: true`, all optional, all absent from a pre-0.8 file. `spawn
+  --ticket` and `divide --confirm` write the first two. A retired lane is skipped by
+  the collision report and by `codeowners` (said aloud), `spawn` refuses it without
+  `--force`, `status` counts it, and `cleanup` suggests retiring a lane whose ticket
+  is done — as a suggestion; the edit is the person's. The gate's verdict for a
+  retired lane is unchanged, pinned.
+- **The dependency step** (#73). A worktree is a checkout of tracked files and has no
+  `node_modules`; `spawn` and `open` now name the install command from the lockfile
+  (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`, `uv sync`,
+  `poetry install`, …), once per worktree, before "start your coding agent". A
+  manifest without a lockfile is told the install is its own call; no manifest, no
+  line. Nothing is installed for you.
+- **`--propose` can bound new work** (#71). A suggested file that does not exist yet is
+  widened to the nearest directory that does (`src/components/settings/**`), never to
+  a single top-level segment; a suggestion with no existing ancestor is dropped with
+  the reason said. Every glob written still matches something real. The proposal marks
+  which lines were widened, so accepting a directory grant is an informed act.
+- **`lanekeeper --help` says what to run first** (#64): an epilogue leading with
+  `spawn --ticket` and `install-gate`, grouping the rest, saying what `init` is for
+  and what it falls back to, and linking the guide. A mistyped command is answered
+  with the nearest real one.
+- `check` gained `--branch` (the head ref, for CI's detached checkout).
+
+### Changed
+
+- **`config.yaml` is written minimally** (#68): only what differs from the defaults,
+  with `version` and `project` always. A fresh `spawn --ticket` writes a file dominated
+  by the lanes instead of ~180 lines of defaults frozen at the version that wrote
+  them; a project that omits a section picks up the current default on upgrade. The
+  baseline is what a *missing* key loads as, not the starter policy — pinned by a test
+  that loads the minimal and the exhaustive file to the same `Config`. An existing
+  exhaustive file keeps every value it holds and shrinks the next time lanekeeper has a
+  reason to write it. `save_config(minimal=False)` keeps the old form.
+- **`cleanup` and `uninit` ask git whether a branch is merged into the base** (#65)
+  with `git merge-base --is-ancestor`, instead of inferring it from `git branch -d` —
+  which says yes to a branch whose upstream holds its commits, the normal end state of
+  an agent's work with an open pull request, and had "fully merged" said about work
+  nobody had merged. A pushed, unmerged branch is kept and the message says where its
+  commits are; a branch nowhere but here gets the stronger warning; a merged one is
+  deleted naming the base. Tests run against a bare repository as `origin`: nothing in
+  the suite had ever pushed anywhere.
+- **Every `check` report says where it ran** (#77): the checkout, the agent and lane
+  when it is a worktree, the worktrees that exist when it is the main checkout, and a
+  warning above the verdict when a worktree is asked about a different lane than its
+  own `.lane` names. No verdict changes.
+- **Every "run this next" line prints the form the person used** (#76) — `lanekeeper`
+  or `python -m lanekeeper.cli` with the interpreter as typed — and the hand-over to
+  another window carries the `python -m` fallback once. `LANEKEEPER_INVOCATION`
+  overrides it, for the PowerShell wrapper function. Nothing touches `PATH`.
+- **The commit-the-policy advice names the branch the person is on** (#69), never a
+  protected one, and points at a `lane: policy` pull request. It no longer says "here,
+  on 'main'" to somebody on `my-test`.
+- **`spawn` no longer says an editor window opened when none did** (#67). Without
+  `--open` it points at `lanekeeper open <agent>`; the editor is opened before the
+  instructions print so they can be true.
+- **`templates/pull_request_template.md`** (#74) asks for the lane as free text
+  matching the `lane:` label and a pasted `check` verdict; no layer checkboxes, no
+  seat row.
+- `--repo` suggests the root in the platform's own spelling (#66).
+
+### Fixed
+
+- The boundary parser read HTML comments — an issue form's guidance — as lane names
+  and paths (#75). Comments are stripped from the whole body before sectioning; an
+  unterminated one hides the rest, as GitHub renders it.
+
 ## [v0.7.12] — 2026-09-06
 
 ### Fixed
