@@ -670,3 +670,89 @@ whole-backlog path. If a future session finds users confused by having both, del
   is red or missing; stop and report what is blocking instead.
 - One subtask per session. Finish with `/code-review`, a confidence score against the
   issue's definition of done, a PR saying `Closes #N`, and an update to this file.
+
+---
+
+## Session of 2026-09-06 (second): the owner ran the deep-test protocol — no code changes
+
+The owner ran the deep-test protocol himself on Windows against published **0.7.12**, on a
+real clone of `kish21/mini-issue-tracker` with the `gh` stand-in. **Nothing was built this
+session on purpose** — the standing instruction was to log every finding as a GitHub issue
+and keep testing, and to plan the fixes afterwards as one piece of work rather than
+patching as we went.
+
+**The gate was right on every single run** — locally and in real CI, on passes and on
+refusals, six to nine seconds a run in Actions. Every finding below is about what
+surrounds it.
+
+### What the run actually proved, in real CI (tracker PRs #10 and #11)
+
+| Protocol step | Situation | Verdict | Time |
+|---|---|---|---|
+| 3.4 | Policy PR, no label → labelled `lane: policy` | ❌ then ✅ | 9s / 6s |
+| 5.1 | Agent PR, no label | ❌ fails closed | 7s |
+| 5.2 | `lane: feat-02` | ✅ | 6s |
+| 5.3 | Stray file pushed, then reverted | ❌ names it, then ✅ | 9s / 8s |
+| 5.4 | Two lane labels at once | ❌ refused | 6s |
+
+Locally: 4.3 passed on two files (one of them **created** during the work — a lane may name
+a file that does not exist yet), 4.4 named the stray file, 6.1 reported a true collision.
+
+### The eleven issues filed (#62–#80)
+
+**#80 is the serious one and the only one touching the guarantee.** `spawn --ticket 3`
+warned that `feat-03` and `feat-02` both claim `src/domain/contracts.ts` — then proceeded:
+the lane was already written (`Written into the policy` prints *before* the warning), the
+worktree created, the agent started. So "settle it first" arrives after it was settled the
+other way. Worse, **both lanes allow the file, so both agents' checks pass** and the clash
+surfaces at merge, with everything green until then — and the warning never mentions
+`shared: true`, the remedy #25 shipped for exactly this. It neither asked nor blocked,
+against a product rule that says lanekeeper asks.
+
+The rest, grouped by what they are:
+
+- **The recurring complaint — lanekeeper knows the answer and makes the user fetch it:**
+  #62 (blocks a legitimate file, then leaves you hand-editing YAML), #64 (`--help` does not
+  say what to run first), #72 (retype a lane the branch name already carries; a mislabel
+  checks against the wrong boundary), #73 (the worktree has no dependencies and nothing
+  says so), #76 (`open` sends you into a window where `lanekeeper` is not on PATH, then
+  prescribes `lanekeeper check` there), #79 (the verdict lives only in the raw CI log; the
+  PR page shows a red X and no reason). **Treat these six as one fix, not six.**
+- **Never looks at the remote:** #65 (`cleanup` deleted two pushed, unmerged branches as
+  "fully merged" — one was PR #9's head) and #78 (`spawn` reused a branch name that already
+  had an open PR; the collision surfaced only at `git push`, where git's own hint — `git
+  pull` — would have merged 1,336 unrelated lines into a two-line change). Same blind spot,
+  opposite directions; one small remote lookup serves both.
+- **Says too little about its own state:** #77 (`check` never names the checkout it
+  inspected, so running it in the wrong window of the two `open` created produces seven red
+  lines and no clue), #63 (a tracked generated file trips every lane forever), #67 (claims
+  an editor opened when `--open` was not passed), #68 (`config.yaml` writes ~180 lines of
+  defaults, burying the lanes and freezing them), #69 (says "commit the policy on 'main'"
+  regardless of where you are, and names a branch its own config calls protected), #66
+  (`--repo` suggests forward-slash paths on Windows).
+
+**#73 carries the owner's decision, recorded in a comment:** the install stays the user's
+choice, but a `--install` flag must exist — and it must walk the tree for **every** manifest
+(`frontend/package.json` *and* `backend/pyproject.toml`), lockfile-exact, because a worktree
+where only the frontend builds is not a prepared desk. Printing the command for the user to
+paste was rejected as the same mistake as #62 and #72.
+
+**Not a bug, so it does not get re-filed:** `under the'policy' lane` with an apparently
+missing space is the terminal wrapping longer paths; `check.py:193` has the space.
+
+### Where the trial stands
+
+- Tracker PR #10 (the policy) is **merged**; `main` there now carries the gate and lanes.
+- Tracker PR #11 is open, green, labelled `lane: feat-02`, and is a throwaway.
+- Tracker PR #9 (the real 1,336-line FEAT-02 work) is untouched — #78 was worked around by
+  pushing under `parallel/agent-001/2-feat-02-deep-test`, never by forcing over its head.
+- Two agents are live in the clone: `agent-001`/`feat-02`, `agent-002`/`feat-03`.
+  `config.yaml` there holds an **uncommitted** `feat-03` lane; CI cannot see it until it is
+  committed.
+
+**Stopped at protocol step 6.1b** (spawn the same ticket twice → expect a refusal naming the
+occupant, the #24 fix). Parts 6 and 7 remain, and `lanekeeper board` is still unverified
+against a live GitHub project.
+
+**Still true and still not done:** `docs/getting-started.md` has no product-playbook
+combination section; the 15-minute tester sheet artifact is stale at v0.7.7.
