@@ -541,8 +541,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
 
     print(f"\n📋 LANEKEEPER — {config.project_name.upper()}\n")
+    retired = sorted(n for n, l in config.lanes.items() if l.retired)
+    if config.lanes:
+        print(f"  Lanes: {len(config.lanes)}"
+              + (f" ({len(retired)} retired: {', '.join(retired)})" if retired else ""))
+        print()
     if not agents:
-        print("  No active agents found. Run 'lanekeeper spawn' to start one.\n")
+        print(f"  No active agents found. Run '{invocation()} spawn' to start one.\n")
         return 0
 
     header = f"{'Agent ID':<12} {'Name':<14} {'Seat':<6} {'Lane':<12} {'Status':<10} {'Ports':<16} {'Task'}"
@@ -670,6 +675,16 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     # A shared zone has no owner on purpose (#25). Spawning an agent into it would give
     # that zone exactly the single owner it is declared not to have, and every other
     # lane would then be told to escalate changes to a file an agent was busy editing.
+    if config.get_lane(args.lane).retired and not args.force:
+        # Retired is bookkeeping, not enforcement (#70): the gate still checks the
+        # lane exactly as before. But somebody spawning into it is either working a
+        # finished ticket or reusing a name, and both deserve a sentence first.
+        print(f"❌ Lane '{args.lane}' is marked retired in {paths.display_config_path()}: "
+              f"its work is finished.", file=sys.stderr)
+        print("   Remove 'retired: true' from the lane to reopen it, or --force to spawn "
+              "into it as it is.", file=sys.stderr)
+        return 1
+
     if config.get_lane(args.lane).shared:
         print(f"❌ Lane '{args.lane}' is shared code: it belongs to no agent on purpose.",
               file=sys.stderr)
@@ -1544,6 +1559,8 @@ def cmd_codeowners(args: argparse.Namespace) -> int:
     if plan.unowned_lanes:
         print(f"   No owner, so left out: {', '.join(plan.unowned_lanes)}")
         print("   Give them an 'owner:' in config.yaml, or a --owner for everything.")
+    if plan.retired_lanes:
+        print(f"   Retired, so left out: {', '.join(plan.retired_lanes)}")
     if plan.skipped_count:
         print(f"   {plan.skipped_count} pattern(s) CODEOWNERS cannot express were "
               f"skipped; the file says which and why:")
@@ -1794,6 +1811,25 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     #     unmerged branch is kept and named, because a branch is the one thing here that
     #     may hold work nobody has merged yet. Monotonic agent ids meant these used to
     #     pile up forever, and a re-spawned agent silently resumed an old one.
+    # The natural moment to ask whether the lane is finished (#70) — and only to ask.
+    # Nothing here reads the tracker or edits the policy: a closed ticket does not
+    # mean the lane is done, and narrowing enforcement is never the tool's to do.
+    retire_note = ""
+    try:
+        lane_cfg = load_config(root).lanes.get(agent.lane)
+    except Exception:
+        lane_cfg = None
+    if lane_cfg is not None and lane_cfg.ticket and not lane_cfg.retired:
+        others = [a for a in state_mgr.list_agents()
+                  if a.id != agent.id and a.lane == agent.lane
+                  and a.status not in TERMINAL_STATUSES]
+        if not others:
+            retire_note = (
+                f"   If #{lane_cfg.ticket} is finished, you can mark lane '{agent.lane}' "
+                f"retired — 'retired: true' under it in {paths.display_config_path()}. "
+                f"A suggestion, and the edit is yours: the collision report and "
+                f"CODEOWNERS then skip it; the gate does not change.")
+
     branch_note = ""
     if agent.branch:
         if worktree_mgr.delete_branch(agent.branch):
@@ -1817,6 +1853,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print(f"   Released ports: {', '.join(str(p) for p in released)}")
     if branch_note:
         print(branch_note)
+    if retire_note:
+        print(retire_note)
     if still_bound:
         ports = ", ".join(str(p) for p in sorted(still_bound))
         print(f"⚠️  Port(s) {ports} are still bound by a live process.")

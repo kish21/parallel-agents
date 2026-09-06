@@ -405,7 +405,24 @@ class Config:
             },
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, minimal: bool = False) -> Dict[str, Any]:
+        """The configuration as `config.yaml` holds it.
+
+        `minimal` writes only what differs from the defaults (#68). The exhaustive form
+        wrote every default there is — 25 container names, 35 generic directories, six
+        intake thresholds — so the ten lines a person cares about sat inside 180 they
+        never chose, every policy change was a 180-line diff, and a default written
+        into the file was frozen at the version that wrote it, silently and forever.
+        `load_config` fills whatever is missing from the *current* defaults, so a file
+        holding only the lanes loads to the same `Config` and picks up improved
+        defaults on upgrade. Hand-written values differ by definition, so they stay.
+        """
+        full = self._full_dict()
+        if not minimal:
+            return full
+        return minimal_dict(full)
+
+    def _full_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
             "project": {"name": self.project_name},
@@ -598,6 +615,51 @@ class Config:
             ),
             generated=_generated_patterns(data.get("generated")),
         )
+
+
+#: Keys written whatever their value: the file has to say what it is and whose it is.
+ALWAYS_WRITTEN = ("version", "project")
+
+
+def minimal_dict(full: Dict[str, Any]) -> Dict[str, Any]:
+    """`full` with every value that equals what `from_dict` would fill in removed.
+
+    The baseline is `Config.from_dict({})` — what a *missing* key becomes — and not
+    `Config.default()`, which is the starter policy `init` writes with its stock lanes
+    and port ranges. Comparing against the wrong one would drop a port range that a
+    missing key does not restore, and the minimal file would load to a different
+    configuration from the exhaustive one. A test pins that the two load the same.
+    """
+    baseline = Config.from_dict({})._full_dict()
+    return _strip_equal(full, baseline, top=True)
+
+
+def _strip_equal(value: Any, default: Any, top: bool = False) -> Any:
+    if isinstance(value, dict) and isinstance(default, dict):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            if top and key in ALWAYS_WRITTEN:
+                out[key] = item
+                continue
+            if key not in default:
+                out[key] = item
+                continue
+            kept = _strip_equal(item, default[key])
+            if kept is _OMIT:
+                continue
+            out[key] = kept
+        if not out and not top:
+            return _OMIT
+        return out
+    return _OMIT if value == default else value
+
+
+class _Omit:
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<omit>"
+
+
+_OMIT = _Omit()
 
 
 #: The lane name `check` uses for a change to the policy files. Not declarable.
@@ -938,10 +1000,20 @@ def load_config(root_dir: Optional[Path] = None) -> Config:
     return Config.from_dict(data)
 
 
-def save_config(config: Config, root_dir: Optional[Path] = None) -> Path:
+def save_config(config: Config, root_dir: Optional[Path] = None,
+                minimal: bool = True) -> Path:
+    """Writes the policy file, in the minimal form unless told otherwise (#68).
+
+    Every write is a whole-file write, so an exhaustive file written by an earlier
+    release shrinks the next time lanekeeper has a reason to write it — a lane added
+    by `spawn --ticket`, a path added by `allow`. It loads to the same configuration;
+    a value that was hand-set, or that an old default left different from the current
+    one, is kept because it differs.
+    """
     root = root_dir or Path.cwd()
     cfg_file = paths.config_path(root)
     cfg_file.parent.mkdir(parents=True, exist_ok=True)
     with open(cfg_file, "w", encoding="utf-8") as f:
-        yaml.safe_dump(config.to_dict(), f, sort_keys=False, default_flow_style=False)
+        yaml.safe_dump(config.to_dict(minimal=minimal), f, sort_keys=False,
+                       default_flow_style=False)
     return cfg_file
