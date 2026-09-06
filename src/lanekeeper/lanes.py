@@ -29,6 +29,10 @@ class LaneValidationResult:
     is_valid: bool
     allowed_files: List[str] = field(default_factory=list)
     violations: List[LaneViolation] = field(default_factory=list)
+    #: Files the project declares a build writes (`generated:` in the policy, #63).
+    #: Neither allowed nor a violation: they are not this change's work. Listed so a
+    #: report can say they were left out rather than have them silently vanish.
+    generated_files: List[str] = field(default_factory=list)
 
 
 class LaneEngine:
@@ -184,14 +188,38 @@ class LaneEngine:
         return None
 
     @classmethod
+    def is_generated(cls, filepath: str | Path, generated: Sequence[str]) -> bool:
+        """Whether the project has declared this path as something a build writes.
+
+        Never a policy file, whatever the list says: `generated:` lives in the policy,
+        which no lane may edit, and the one way that guarantee could be undone from
+        inside a pull request is by a list in that file exempting the file itself.
+        """
+        if not generated:
+            return False
+        norm = cls.normalize_path(filepath)
+        if cls.is_policy(norm):
+            return False
+        return any(cls.match_glob(norm, pattern) for pattern in generated)
+
+    @classmethod
     def validate_files(cls, files: List[str | Path], lane: LaneConfig,
-                       shared: Sequence[LaneConfig] = ()) -> LaneValidationResult:
+                       shared: Sequence[LaneConfig] = (),
+                       generated: Sequence[str] = ()) -> LaneValidationResult:
         allowed: List[str] = []
         violations: List[LaneViolation] = []
+        skipped: List[str] = []
 
         for f in files:
             norm_f = cls.normalize_path(f)
             if cls.is_bookkeeping(norm_f):
+                continue
+            # A tracked build artifact — `tsconfig.tsbuildinfo`, a lockfile rewritten by
+            # an unrelated install — trips every lane on every check until somebody
+            # untracks it, and a team that hits that twice switches the check off. The
+            # project may name such files in the policy, and only there (#63).
+            if cls.is_generated(norm_f, generated):
+                skipped.append(norm_f)
                 continue
 
             violation = cls.check_file(norm_f, lane, shared)
@@ -205,4 +233,5 @@ class LaneEngine:
             is_valid=len(violations) == 0,
             allowed_files=allowed,
             violations=violations,
+            generated_files=skipped,
         )

@@ -1117,15 +1117,18 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(f"❌ {e}", file=sys.stderr)
         return 1
 
+    # The branch, for `--lane-from-branch` and for the hint in the no-label refusal.
+    # Named on the command line in CI (the checkout there is a detached merge commit),
+    # read from git by hand.
+    branch = getattr(args, "branch", None) or ""
+    if not branch and (getattr(args, "lane_from_branch", False) or not args.lane):
+        branch = WorktreeManager(root).current_branch(cwd=root)
     try:
-        if args.lane:
-            lane = args.lane
-        elif args.labels_json is not None:
-            lane = check_mod.lane_from_labels_json(args.labels_json, args.label_prefix)
-        else:
-            raise check_mod.NoLaneError(
-                "Say which lane this change belongs to: --lane <name>, or --labels-json "
-                "with the pull request's labels.")
+        lane = check_mod.resolve_lane(
+            explicit=args.lane or "", labels_json=args.labels_json,
+            label_prefix=args.label_prefix, branch=branch, lanes=list(config.lanes),
+            branch_prefix=config.git.branch_prefix,
+            from_branch=getattr(args, "lane_from_branch", False))
     except check_mod.NoLaneError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 2
@@ -1135,7 +1138,114 @@ def cmd_check(args: argparse.Namespace) -> int:
         include_working_tree=args.working_tree)
     print()
     print(check_mod.render(report))
+    if getattr(args, "github", False):
+        # Presentation only (#79): the verdict and the exit code are decided above.
+        # The summary file is GitHub's; when the variable is absent this is not CI
+        # and nothing is written. The annotations are workflow commands on stdout.
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            try:
+                with open(summary_path, "a", encoding="utf-8") as f:
+                    f.write(check_mod.github_summary(report))
+            except OSError as e:
+                print(f"⚠️  Could not write the job summary: {e}", file=sys.stderr)
+        for line in check_mod.annotations(report):
+            print(line)
     return 0 if report.passed else 2
+
+
+def cmd_allow(args: argparse.Namespace) -> int:
+    """`lanekeeper allow <path> --lane <name>`: one decision, recorded (#62).
+
+    The gate names the file it blocked and, until this existed, left the person to
+    find the policy, find the lane, and add a line at the right indentation. Six
+    steps for one decision — *yes, that file belongs to this lane* — at the moment
+    that decides whether somebody keeps the gate switched on. The decision is still
+    theirs: this command never widens a lane by itself, and it refuses the cases that
+    exist precisely so a person makes the call deliberately.
+    """
+    try:
+        here = WorktreeManager._find_repo_root()
+    except GitError:
+        here = Path.cwd()
+    # The policy lives in the main checkout. Inside an agent's worktree, that is the
+    # checkout this worktree was made from — and its `.lane` says which lane this is.
+    main = WorktreeManager.main_worktree_root()
+    root = main if (main is not None and main != here) else here
+    lane_name = args.lane or ""
+    if not lane_name:
+        lane_name = check_mod.read_lane_file(here / ".lane").get("LANE", "")
+    if not lane_name:
+        print("❌ Say which lane: --lane <name>. (Inside an agent's worktree, its own "
+              "lane is the default.)", file=sys.stderr)
+        return 1
+    try:
+        config = load_config(root)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    if lane_name == check_mod.POLICY_LANE or not config.has_lane(lane_name):
+        known = ", ".join(sorted(config.lanes)) or "(none declared)"
+        print(f"❌ Unknown lane '{lane_name}'. Declared lanes: {known}.", file=sys.stderr)
+        return 1
+    lane = config.get_lane(lane_name)
+    if lane.shared:
+        print(f"❌ '{lane_name}' is a shared zone. It exists so a change there is "
+              f"decided by a person, not widened by a command; edit "
+              f"{paths.display_config_path(root)} yourself.", file=sys.stderr)
+        return 1
+
+    wanted = ticket_mod._clean(list(args.paths))
+    added, already, refused = [], [], []
+    for path in wanted:
+        problem = _allow_refusal(config, lane, path)
+        if problem:
+            refused.append((path, problem))
+        elif path in lane.allow or any(LaneEngine.match_glob(path, p) for p in lane.allow
+                                       if not any(c in path for c in "*?[")):
+            already.append(path)
+        else:
+            added.append(path)
+    for path, why in refused:
+        print(f"❌ {path}: {why}", file=sys.stderr)
+    if refused:
+        print("   Nothing was changed.", file=sys.stderr)
+        return 1
+    for path in added:
+        lane.allow.append(path)
+    if added:
+        save_config(config, root)
+    for path in added:
+        print(f"✅ {path} is now allowed in lane '{lane_name}'.")
+    for path in already:
+        print(f"ℹ️  {path} was already allowed in lane '{lane_name}'.")
+    if added:
+        print(f"   {paths.display_config_path(root)} changed; commit it (it is the policy, "
+              f"so on its own, labelled 'lane: policy') for the gate in CI to read it.")
+    return 0
+
+
+def _allow_refusal(config: Config, lane: LaneConfig, path: str) -> str:
+    """Why `allow` will not add this path, or "" when it may."""
+    from .divide.collision import patterns_intersect
+    if LaneEngine.is_policy(path) or any(
+            LaneEngine.match_glob(path, p) for p in check_mod.policy_lane_paths(config)):
+        return ("this is a policy file. No lane may own it; a change to it is made under "
+                "the 'policy' lane, by a person.")
+    for zone in LaneEngine.shared_lanes(config):
+        if zone.name != lane.name and LaneEngine.claims(path, zone):
+            return (f"this is in the shared zone '{zone.name}', which belongs to no lane on "
+                    f"purpose. A change there is escalated, not claimed.")
+    for other in sorted(config.lanes.values(), key=lambda l: l.name):
+        if other.name == lane.name or other.shared or other.retired:
+            continue
+        for theirs in other.allow:
+            if patterns_intersect(theirs, path):
+                return (f"lane '{other.name}' already claims it ({theirs}). Widening "
+                        f"'{lane.name}' into another lane's territory is the collision "
+                        f"the gate exists to prevent — decide it in "
+                        f"{paths.display_config_path()}, or mark the file 'shared: true'.")
+    return ""
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -1237,14 +1347,17 @@ def cmd_diff(args: argparse.Namespace) -> int:
         print(f"   Agent '{agent.id}' cannot be diffed against an undeclared lane.", file=sys.stderr)
         return 1
     lane_res = LaneEngine.validate_files(
-        changed_files, lane_config, LaneEngine.shared_lanes(config))
+        changed_files, lane_config, LaneEngine.shared_lanes(config),
+        generated=config.generated)
 
     print(f"\n📝 DIFF SUMMARY FOR {agent.name} ({agent.id})")
     print(f"Branch: {agent.branch}")
     # Bookkeeping files (.lane, .env) are written by lanekeeper itself and are not
-    # listed below, so counting them here made the total disagree with the list.
+    # listed below, so counting them here made the total disagree with the list. The
+    # same goes for files the policy declares a build writes.
     shown = [f for f in changed_files
-             if not LaneEngine.is_bookkeeping(LaneEngine.normalize_path(f))]
+             if not LaneEngine.is_bookkeeping(LaneEngine.normalize_path(f))
+             and LaneEngine.normalize_path(f) not in lane_res.generated_files]
     print(f"Total Modified Files: {len(shown)}\n")
 
     for f in shown:
@@ -1261,6 +1374,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
         else:
             print(f"  ✓ [LANE OK]    {norm_f}")
 
+    if lane_res.generated_files:
+        print(f"  ({len(lane_res.generated_files)} generated file(s) left out, as the policy "
+              f"says: {', '.join(lane_res.generated_files)})")
     print()
     return 0
 
@@ -1292,6 +1408,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
     else:
         for v in report.lane_result.violations:
             print(f"    ✗ Violation: {v.filepath} (Reason: {v.reason})")
+            if v.reason == "not_allowed":
+                print(f"        If this file belongs in this lane: "
+                      f"{invocation()} allow --lane {report.lane} {v.filepath}")
+    if report.lane_result.generated_files:
+        print(f"    ({len(report.lane_result.generated_files)} generated file(s) left out, "
+              f"as the policy says: {', '.join(report.lane_result.generated_files)})")
 
     # Capability gates
     if report.gates_evaluated:
@@ -1922,11 +2044,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_chk.add_argument("--head", default="HEAD", help="The change (default HEAD)")
     p_chk.add_argument("--working-tree", action="store_true",
                        help="Also check uncommitted and untracked files")
+    p_chk.add_argument("--branch", default=None,
+                       help="The change's branch name (default: the one checked out); "
+                            "with --lane-from-branch, where the lane is read from")
+    p_chk.add_argument("--lane-from-branch", action="store_true",
+                       help="When no label names a lane, read it from a branch name "
+                            "lanekeeper made; a label still wins, and one that disagrees "
+                            "with the branch fails")
+    p_chk.add_argument("--github", action="store_true",
+                       help="In GitHub Actions: write the verdict to the job summary and "
+                            "annotate each violated file")
     p_chk.add_argument("--write-workflow", action="store_true",
                        help=f"Write the GitHub Actions workflow to {check_mod.WORKFLOW_PATH.as_posix()} and exit")
     p_chk.add_argument("--force", action="store_true",
                        help="With --write-workflow, replace an existing workflow file")
     p_chk.set_defaults(func=cmd_check)
+
+    # allow
+    p_allow = subparsers.add_parser(
+        "allow", help="Add a file the gate blocked to a lane, without editing YAML")
+    p_allow.add_argument("paths", nargs="+", metavar="PATH",
+                         help="File or glob to allow (comma-separated also works)")
+    p_allow.add_argument("--lane", help="The lane (default: this worktree's own lane)")
+    p_allow.set_defaults(func=cmd_allow)
 
     # stop
     p_stop = subparsers.add_parser("stop", help="Stop a running agent process")

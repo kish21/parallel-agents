@@ -318,6 +318,13 @@ class Config:
     editor: EditorConfig = field(default_factory=EditorConfig)
     board: BoardConfig = field(default_factory=BoardConfig)
     codeowners: CodeownersConfig = field(default_factory=CodeownersConfig)
+    #: Paths a build writes, which the gate therefore ignores in every lane (#63):
+    #: `*.tsbuildinfo`, coverage output, a lockfile an unrelated install rewrote. Empty
+    #: by default — nothing is ignored unless the project says so — and settable only
+    #: here, in the file no lane may edit, so an agent cannot exempt a file from inside
+    #: its own pull request. A built-in list of "common artifacts" was rejected: the
+    #: gate's value is that it has no opinions.
+    generated: List[str] = field(default_factory=list)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -421,6 +428,7 @@ class Config:
                 }
                 for lane in self.lanes.values()
             ],
+            **({"generated": list(self.generated)} if self.generated else {}),
             "ports": {
                 name: {"start": p_range.start, "end": p_range.end}
                 for name, p_range in self.port_ranges.items()
@@ -588,11 +596,26 @@ class Config:
                 default_owner=owner_list(
                     "codeowners.default_owner", codeowners_data.get("default_owner")),
             ),
+            generated=_generated_patterns(data.get("generated")),
         )
 
 
 #: The lane name `check` uses for a change to the policy files. Not declarable.
 RESERVED_LANE_NAME = "policy"
+
+
+def _generated_patterns(raw: Any) -> List[str]:
+    """The `generated:` list, refused rather than guessed at when it is not a list."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raise InvalidLaneError(
+            f"'generated' must be a list of patterns, one per line, not the single "
+            f"string {raw!r}.")
+    if not isinstance(raw, list):
+        raise InvalidLaneError(
+            f"'generated' must be a list of patterns (found {type(raw).__name__}).")
+    return [str(p).strip() for p in raw if p is not None and str(p).strip()]
 
 #: What `LaneConfig.paths_from` may say. The same three answers `divide` already
 #: distinguishes the moment a boundary is read; this keeps the distinction once

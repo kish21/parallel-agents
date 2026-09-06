@@ -216,7 +216,8 @@ class Validator:
                 f"Could not read this agent's changes, so nothing was checked: {e}")
             return failed()
         lane_result = LaneEngine.validate_files(
-            changed_files, lane_config, LaneEngine.shared_lanes(self.config))
+            changed_files, lane_config, LaneEngine.shared_lanes(self.config),
+            generated=self.config.generated)
 
         # A file that no declared lane would accept is a symptom of a lane configuration
         # that does not describe this repository — not of the agent doing something wrong.

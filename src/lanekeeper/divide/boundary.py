@@ -53,10 +53,24 @@ _RULE = re.compile(r"^\s*([-*_])(\s*\1){2,}\s*$")
 #: ``- [x] **Domain / Contracts:** `src/domain/contracts.ts` *(IssueContract)*``.
 _CODE_SPAN = re.compile(r"`([^`]+)`")
 
+#: An HTML comment, which is where an issue form keeps the guidance it shows the filer
+#: while they type. GitHub leaves it in the body and renders none of it, so the filer
+#: never saw it as part of their answer — and product-playbook's guidance is written
+#: in exactly the shapes this module looks for: a backticked example path under Target
+#: Files, a sentence under a Lane heading the form told them to leave blank.
+#:
+#: One that is never closed runs to the end of the body, because that is how GitHub
+#: renders it: everything after a stray `<!--` disappears, and a field the filer could
+#: not see is not a field they filled in.
+_HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
+
 
 def read(issue, settings) -> TicketBoundary:
     """One ticket's stated boundary, exactly as the filer wrote it."""
-    body = issue.body or ""
+    # Comments go before the body is cut into sections, not out of each section after:
+    # a comment may open under one heading and close under a later one, and GitHub
+    # hides the heading in between along with everything else.
+    body = _HTML_COMMENT.sub("", issue.body or "")
     paths, ignored = _paths(_section(body, settings.path_headings))
     lane = _lane_name(_section(body, settings.lane_headings))
     return TicketBoundary(
