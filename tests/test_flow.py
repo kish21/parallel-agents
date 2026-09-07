@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import io
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -296,7 +297,10 @@ class TestHook(RepoWithRemote):
         text = hook.read_text(encoding="utf-8")
         self.assertIn("parallel/*", text)
         self.assertIn("--lane-from-branch", text)
-        self.assertIn("python -m lanekeeper", text)
+        # The fallback is the installing interpreter by absolute path, spelled with
+        # forward slashes so sh reads it the same on Windows (`python.exe` there).
+        self.assertIn(shlex.quote(Path(sys.executable).as_posix()) + " -m lanekeeper", text)
+        self.assertNotIn("\\", text)
 
     def test_somebody_elses_hook_is_left_alone_without_force(self):
         self.policy()

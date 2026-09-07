@@ -342,7 +342,10 @@ def hook_text(branch_prefix: str, base: str, interpreter: str = "") -> str:
     and a hook that cannot start is a push refused for a reason nobody asked for.
     """
     prefix = branch_prefix.rstrip("/") + "/"
-    python = shlex.quote(interpreter or sys.executable)
+    # Forward slashes even on Windows: this is an sh script, and `C:/…/python.exe`
+    # is a path both sh and Windows read the same way, where a backslash inside
+    # quotes is whatever the shell that runs the hook decides it is.
+    python = shlex.quote(Path(interpreter or sys.executable).as_posix())
     return f"""#!/usr/bin/env sh
 {HOOK_MARK} — written by `lanekeeper install-gate --hooks`; delete this file to remove it.
 # Runs the lane check before a push from an agent's branch. Branches lanekeeper did
