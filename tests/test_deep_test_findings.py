@@ -86,7 +86,7 @@ class RepoTestCase(unittest.TestCase):
         args = argparse.Namespace(name=None, lane=None, ticket=None,
                                   task=cli.p_spawn_default_task(), seat=None, command=None,
                                   force=False, open=False, allow=None, propose=False,
-                                  yes=False, accept_overlap=False)
+                                  yes=False, accept_overlap=False, no_gate=True)
         for k, v in kw.items():
             setattr(args, k, v)
         out, err = io.StringIO(), io.StringIO()
@@ -228,7 +228,7 @@ class TestSpawnAndOpenNameTheInstall(RepoTestCase):
                              encoding="utf-8", errors="replace", env=env)
         self.assertEqual(res.returncode, 0, output_of(res))
         self.assertIn("npm ci", res.stdout)
-        self.assertIn("python -m lanekeeper.cli", res.stdout)
+        self.assertIn("python -m lanekeeper", res.stdout)
 
 
 # --- #76: the command that does not resolve in the other window ------------------
@@ -247,27 +247,27 @@ class TestTheInvocationForm(unittest.TestCase):
         self.assertEqual(
             inv_mod.invocation(r"C:\Python\Lib\site-packages\lanekeeper\cli.py",
                                orig_argv=["python", "-m", "lanekeeper.cli", "status"], env={}),
-            "python -m lanekeeper.cli")
+            "python -m lanekeeper")
         self.assertEqual(
             inv_mod.invocation("/x/lanekeeper/cli.py",
                                orig_argv=["python3", "-m", "lanekeeper.cli"], env={}),
-            "python3 -m lanekeeper.cli")
+            "python3 -m lanekeeper")
         self.assertEqual(
             inv_mod.invocation("/x/lanekeeper/cli.py",
                                orig_argv=["/venv/bin/python3.12", "-m", "lanekeeper.cli"],
                                env={}),
-            "python3.12 -m lanekeeper.cli")
+            "python3.12 -m lanekeeper")
 
     def test_an_explicit_override_wins(self):
         self.assertEqual(inv_mod.invocation("/x/lanekeeper/cli.py",
                                             env={"LANEKEEPER_INVOCATION": "lk"}), "lk")
 
     def test_the_fallback_line_only_when_the_shim_is_in_use(self):
-        self.assertIn("python -m lanekeeper.cli", inv_mod.fallback_line("lanekeeper"))
-        self.assertEqual(inv_mod.fallback_line("python -m lanekeeper.cli"), "")
+        self.assertIn("python -m lanekeeper", inv_mod.fallback_line("lanekeeper"))
+        self.assertEqual(inv_mod.fallback_line("python -m lanekeeper"), "")
 
     def test_every_run_this_next_line_uses_the_form_the_person_used(self):
-        for form in ("lanekeeper", "python -m lanekeeper.cli"):
+        for form in ("lanekeeper", "python -m lanekeeper"):
             os.environ["LANEKEEPER_INVOCATION"] = form
             try:
                 text = ticket_mod.how_to_work(_lane(), Path("/r/wt"), "agent-001")
@@ -282,7 +282,7 @@ class TestTheInvocationForm(unittest.TestCase):
         os.environ["LANEKEEPER_INVOCATION"] = "lanekeeper"
         try:
             text = ticket_mod.how_to_work(_lane(), Path("/r/wt"), "agent-001")
-            self.assertIn("'python -m lanekeeper.cli' is the same program", text)
+            self.assertIn("'python -m lanekeeper' is the same program", text)
             steps = ticket_mod.next_steps(_lane(), gate_workflow_exists=False)
             self.assertNotIn("same program", steps)
         finally:
@@ -299,8 +299,9 @@ class TestTheSubprocessPrintsWhatItWasStartedAs(RepoTestCase):
                              cwd=str(self.root), capture_output=True, text=True,
                              encoding="utf-8", errors="replace", env=env)
         self.assertEqual(res.returncode, 0, output_of(res))
-        self.assertIn("-m lanekeeper.cli open agent-001", res.stdout)
+        self.assertIn("-m lanekeeper open agent-001", res.stdout)
         self.assertNotIn("To open:     lanekeeper open", res.stdout)
+        self.assertNotIn("lanekeeper.cli open", res.stdout)
 
 
 # --- #80: the collision warning ---------------------------------------------------

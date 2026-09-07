@@ -25,6 +25,7 @@ from typing import List, Optional
 from . import codeowners as codeowners_mod
 from . import paths
 from .check import WORKFLOW_PATH
+from .flow import HOOK_MARK
 from .ports import TERMINAL_STATUSES
 from .worktree import GitError, WorktreeManager
 
@@ -49,12 +50,16 @@ class UninitPlan:
     codeowners: Path = Path(codeowners_mod.DEFAULT_PATH)
     live_agents: List[str] = field(default_factory=list)
     tracked: List[str] = field(default_factory=list)
+    #: The pre-push hook `install-gate --hooks` wrote, when it is ours. Left behind,
+    #: it would refuse to push the very branches this command keeps: `check` with no
+    #: policy fails, and a failing hook aborts the push.
+    hook: Optional[Path] = None
 
     @property
     def is_empty(self) -> bool:
         return not (self.home or self.worktrees or self.branches
                     or self.workflows or self.gitignore_block
-                    or self.codeowners_block)
+                    or self.codeowners_block or self.hook)
 
 
 def _tracked_paths(worktree_mgr: WorktreeManager, candidates: List[str]) -> List[str]:
@@ -141,6 +146,17 @@ def build_plan(root: Path, worktree_mgr: WorktreeManager,
         except OSError:
             plan.codeowners_block = False
 
+    try:
+        res = worktree_mgr._run_git(["rev-parse", "--git-common-dir"], check=False)
+        common = Path((res.stdout or "").strip() or ".git")
+        if not common.is_absolute():
+            common = (root / common).resolve()
+        hook = common / "hooks" / "pre-push"
+        if hook.exists() and HOOK_MARK in hook.read_text(encoding="utf-8"):
+            plan.hook = hook
+    except (GitError, OSError, UnicodeDecodeError):
+        pass
+
     candidates = [p.relative_to(root).as_posix() for p in plan.workflows]
     if plan.codeowners_block:
         candidates.append(plan.codeowners.as_posix())
@@ -202,6 +218,8 @@ def render(plan: UninitPlan) -> str:
     if plan.codeowners_block:
         lines.append(f"  - lanekeeper's managed block in {plan.codeowners.as_posix()} "
                      f"(anything you wrote by hand around it stays)")
+    if plan.hook is not None:
+        lines.append("  - the pre-push hook lanekeeper installed")
 
     if plan.tracked:
         lines.append("")
@@ -325,6 +343,13 @@ def _remove_files(plan: UninitPlan, begin: str, end: str) -> List[str]:
         done.extend(_strip_managed(plan.root / plan.codeowners,
                                    codeowners_mod.BEGIN, codeowners_mod.END,
                                    plan.codeowners.as_posix()))
+
+    if plan.hook is not None:
+        try:
+            plan.hook.unlink()
+            done.append("Removed the pre-push hook.")
+        except OSError as exc:
+            done.append(f"Could not remove the pre-push hook: {exc}")
 
     if plan.gitignore_block and begin and end:
         gitignore = plan.root / ".gitignore"

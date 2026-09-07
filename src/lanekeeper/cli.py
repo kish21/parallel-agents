@@ -6,6 +6,7 @@ import argparse
 import difflib
 import json
 import os
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -48,6 +49,7 @@ from .trackers.base import TrackerError
 from . import ticket as ticket_mod
 from . import uninit as uninit_mod
 from . import deps as deps_mod
+from . import flow as flow_mod
 from .invocation import fallback_line, invocation
 from .divide import boundary as divide_boundary
 from .divide import codebase as divide_codebase
@@ -356,10 +358,13 @@ def cmd_board(args: argparse.Namespace) -> int:
 
 
 def _first_time_setup(root: Path, cfg: Config) -> List[Path]:
-    """What every new policy needs besides its lanes: state, ignore rules, seat cards."""
+    """What every new policy needs besides its lanes: state, ignore rules, and — only
+    when capability gates are configured — the seat cards the gates require."""
     StateManager(root)
     (root / cfg.worktree_dir).mkdir(parents=True, exist_ok=True)
     ensure_gitignore(root)
+    if not cfg.capability_gates:
+        return []
     return [save_card(card, root) for card in default_cards(sorted(cfg.lanes))]
 
 
@@ -619,6 +624,10 @@ def cmd_spawn(args: argparse.Namespace) -> int:
                 raise
             config = Config.default(project_name=root.name)
             config.lanes = {}
+            # No capability gates either, and so no seat cards to write: a person
+            # handing one ticket to one agent has not asked for a review model with
+            # four seats in it. Both arrive the moment somebody configures a gate.
+            config.capability_gates = {}
         state_mgr = StateManager(root)
         worktree_mgr = WorktreeManager(root)
         port_mgr = PortManager(config, state_mgr)
@@ -888,9 +897,24 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(ticket_mod.how_to_work(ticket_lane, resolved_path, agent_id, root=root,
                                      editor_opened=editor_opened,
                                      dependencies=deps_mod.detect(root)))
+    if ticket_lane is not None and not (root / check_mod.WORKFLOW_PATH).exists() \
+            and _interactive() and not getattr(args, "no_gate", False):
+        # The gate is the product, and it was five commands away from the first agent.
+        # Offered, not done: a workflow file is a commit in somebody's repository.
+        try:
+            answer = input("\nInstall the pull-request gate now? It is one file, once per "
+                           "repository. [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = "n"
+        if answer in ("", "y", "yes"):
+            written = check_mod.write_workflow(root, check_mod.DEFAULT_LABEL_PREFIX)
+            if written is not None:
+                print(f"📝 Wrote {written.relative_to(root).as_posix()} — commit it with "
+                      f"the policy.")
     if getattr(args, "open", False):
         return open_code
     print(f"\nTo open:     {inv} open {agent_id}")
+    print(f"What now:    {inv} next")
     return 0
 
 
@@ -992,9 +1016,18 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
         return None
 
     proposed = ()
-    if getattr(args, "propose", False) and not getattr(args, "allow", None) \
-            and not config.has_lane(ticket_mod.lane_name(issue, args.lane or "")) \
-            and not divide_boundary.read(issue, config.divide).paths:
+    nameless = (not getattr(args, "allow", None)
+                and not config.has_lane(ticket_mod.lane_name(issue, args.lane or ""))
+                and not divide_boundary.read(issue, config.divide).paths)
+    if nameless and not getattr(args, "propose", False) and _interactive() \
+            and shutil.which(config.divide.advisor_command):
+        # Most real backlogs do not name files. Refusing and asking for a second run
+        # with --propose was a speed bump on the common case; proposing at once costs
+        # nothing in safety, since nothing is used without a yes.
+        print(f"🎫 Ticket #{issue.ref} names no files. Asking Claude Code which ones it "
+              f"probably touches; nothing is used until you say yes.")
+        args.propose = True
+    if nameless and getattr(args, "propose", False):
         proposed = _propose_boundary(config, root, issue, args)
         if proposed is None:
             return None
@@ -1034,9 +1067,10 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
     # A brand-new project gets the rest of a first-time setup, as `divide --confirm` does.
     if not paths.config_path(root).exists():
         save_config(config, root)
-        _first_time_setup(root, config)
-        print(f"📁 Wrote {paths.display_config_path()} and the seat cards: this is the "
-              f"first agent on this project.")
+        cards = _first_time_setup(root, config)
+        print(f"📁 Wrote {paths.display_config_path()}"
+              + (" and the seat cards" if cards else "")
+              + ": this is the first agent on this project.")
     created, widened = ticket_mod.ensure_lane(config, root, lane)
     lane.policy_uncommitted = ticket_mod.policy_is_uncommitted(root)
     print(ticket_mod.describe(lane, created, widened))
@@ -1109,7 +1143,7 @@ def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespac
     allow_line = " ".join(f"--allow '{p}'" for p in found)
     if getattr(args, "yes", False):
         return tuple(found)
-    if sys.stdin.isatty() and sys.stdout.isatty():
+    if _interactive():
         answer = input("   Use it? The agent will be held to exactly these files. [y/N]: ")
         if ticket_mod.confirm_proposal(issue.ref, found, answer):
             return tuple(found)
@@ -1159,6 +1193,136 @@ def _desk_notes(root: Path, worktree: Path) -> List[str]:
     return notes
 
 
+def _project_root() -> Path:
+    """The main checkout, from wherever the person is standing.
+
+    `work` and `check` put the person inside an agent's worktree on purpose, and
+    `next` exists to answer "what now" from there. The policy and the state live in
+    the main checkout, and a `StateManager` built on the worktree would create a
+    stray state directory in it and answer about nothing.
+    """
+    here = Path.cwd()
+    main = WorktreeManager.main_worktree_root()
+    return main if main is not None and main.resolve() != here.resolve() else here
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    """`lanekeeper next`: the one thing to do now, read from the repository's state."""
+    root = _project_root()
+    try:
+        worktree_mgr = WorktreeManager(root)
+    except GitError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    config = None
+    agents: List[AgentState] = []
+    policy_uncommitted = False
+    try:
+        config = load_config(root)
+    except FileNotFoundError:
+        config = None
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    if config is not None:
+        agents = StateManager(root).list_agents()
+        policy_uncommitted = ticket_mod.policy_is_uncommitted(root)
+    situation = flow_mod.situation(root, config, agents, worktree_mgr,
+                                   policy_uncommitted=policy_uncommitted)
+    print()
+    print(flow_mod.render_situation(situation))
+    return 0
+
+
+def cmd_work(args: argparse.Namespace) -> int:
+    """`lanekeeper work <agent> -- <command>`: the agent, started with its prompt."""
+    root = _project_root()
+    try:
+        config = load_config(root)
+        state_mgr = StateManager(root)
+    except Exception as e:
+        print(f"❌ Error loading project: {e}", file=sys.stderr)
+        return 1
+    agent = state_mgr.get_agent(args.agent)
+    if not agent:
+        print(f"❌ Agent '{args.agent}' not found.", file=sys.stderr)
+        return 1
+    worktree = Path(agent.worktree_path)
+    if not worktree.exists():
+        print(f"❌ Worktree {worktree} does not exist. Run '{invocation()} doctor'.",
+              file=sys.stderr)
+        return 1
+    prompt = flow_mod.prompt_for(agent, config.lanes.get(agent.lane))
+    # argparse's REMAINDER swallows a flag typed after the agent name, so `--print` is
+    # honoured before the `--` separator. After it, the words are the agent's own —
+    # `claude --print` is Claude Code's headless mode, not ours.
+    # Whether argparse keeps the literal `--` in the remainder depends on the Python
+    # version, so it is not relied on: the flags that lead are ours, and everything
+    # from the first word that is not a flag onward is the command, verbatim.
+    raw = [c for c in (args.command or []) if c != "--"]
+    cut = 0
+    while cut < len(raw) and raw[cut].startswith("--"):
+        cut += 1
+    ours, command = raw[:cut], raw[cut:]
+    print_only = getattr(args, "print_prompt", False) or "--print" in ours
+    if print_only or not command:
+        print(prompt)
+        if not command:
+            print(f"\n(To start an agent with it: {invocation()} work {agent.id} -- claude)",
+                  file=sys.stderr)
+        return 0
+    argv = flow_mod.command_with_prompt(command, prompt)
+    shown = " ".join(shlex.quote(a) for a in command)
+    print(f"▶ In {worktree}: {shown}" + ("" if "{prompt}" in shown else " '<the prompt>'"))
+    code = flow_mod.run_in_worktree(argv, worktree)
+    if code == 127:
+        print(f"❌ '{command[0]}' is not on PATH in this shell.", file=sys.stderr)
+    return code
+
+
+def cmd_pr(args: argparse.Namespace) -> int:
+    """`lanekeeper pr <agent>`: check, push, open the pull request with its label."""
+    root = _project_root()
+    try:
+        config = load_config(root)
+        state_mgr = StateManager(root)
+        worktree_mgr = WorktreeManager(root)
+    except Exception as e:
+        print(f"❌ Error loading project: {e}", file=sys.stderr)
+        return 1
+    agent = state_mgr.get_agent(args.agent)
+    if not agent:
+        print(f"❌ Agent '{args.agent}' not found.", file=sys.stderr)
+        return 1
+    worktree = Path(agent.worktree_path)
+    if not worktree.exists():
+        print(f"❌ Worktree {worktree} does not exist.", file=sys.stderr)
+        return 1
+    base = worktree_mgr.merge_target()
+    if worktree_mgr.has_uncommitted_changes(worktree):
+        print(f"❌ {agent.id} has uncommitted changes in {worktree}. Commit them first; a "
+              f"pull request is opened from commits.", file=sys.stderr)
+        return 1
+    if not getattr(args, "no_check", False):
+        # The gate, before the push: a red change is caught here, where it costs a
+        # minute, rather than on the pull request page, where it costs a review.
+        report = check_mod.check_checkout(config, worktree, agent.lane, base=base)
+        print()
+        print(check_mod.render(report))
+        if not report.passed:
+            print(f"\n❌ Not pushed: the change leaves its lane. Fix it, or --no-check to "
+                  f"push anyway and let CI say so.", file=sys.stderr)
+            return 2
+    outcome = flow_mod.open_pull_request(
+        agent, worktree_mgr, base=base, gh=config.intake.github.command,
+        title=getattr(args, "title", None) or "", body=getattr(args, "body", None) or "")
+    print()
+    print(flow_mod.render_pr(outcome))
+    if not outcome.pushed:
+        return 1
+    return 0
+
+
 def cmd_open(args: argparse.Namespace) -> int:
     """Opens an agent's worktree in the configured editor."""
     root = Path.cwd()
@@ -1185,7 +1349,10 @@ def cmd_open(args: argparse.Namespace) -> int:
 
 
 def cmd_install_gate(args: argparse.Namespace) -> int:
-    """`lanekeeper install-gate` — what `check --write-workflow` always did."""
+    """`lanekeeper install-gate` — what `check --write-workflow` always did, plus
+    `--hooks`: the same check as a pre-push hook, so nobody has to remember it."""
+    if getattr(args, "hooks", False):
+        return _install_hook(force=args.force)
     args.write_workflow = True
     args.lane = None
     args.labels_json = None
@@ -1193,6 +1360,34 @@ def cmd_install_gate(args: argparse.Namespace) -> int:
     args.head = "HEAD"
     args.working_tree = False
     return cmd_check(args)
+
+
+def _install_hook(force: bool = False) -> int:
+    try:
+        root = WorktreeManager._find_repo_root()
+    except GitError:
+        print("❌ Must run inside a Git repository.", file=sys.stderr)
+        return 1
+    try:
+        config = load_config(root)
+        prefix = config.git.branch_prefix
+    except (FileNotFoundError, ValueError):
+        prefix = "parallel/"
+    mgr = WorktreeManager(root)
+    base = mgr.merge_target()
+    try:
+        written = flow_mod.install_hook(root, mgr, prefix, base, force=force)
+    except flow_mod.HookNotInstalled as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    if written is None:
+        print("ℹ️  A pre-push hook that is not lanekeeper's is already installed; left alone. "
+              "Use --force to replace it.")
+        return 0
+    print(f"📝 Wrote {written}")
+    print(f"   Every push from a '{prefix.rstrip('/')}/…' branch now runs the lane check "
+          f"first; other branches are not touched. One hook covers every worktree.")
+    return 0
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -2246,6 +2441,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="When the branch name already exists on the remote: "
                               "continue that work, start fresh under a new name, or "
                               "use the name anyway")
+    p_spawn.add_argument("--no-gate", action="store_true",
+                         help="Do not offer to install the pull-request gate")
     p_spawn.add_argument("--accept-overlap", action="store_true",
                          help="With --ticket: proceed without asking when another lane "
                               "claims some of the same files")
@@ -2260,8 +2457,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate.add_argument("--label-prefix", default=check_mod.DEFAULT_LABEL_PREFIX,
                         help="Label prefix the workflow reads the lane from")
     p_gate.add_argument("--force", action="store_true",
-                        help="Replace an existing workflow file")
+                        help="Replace an existing workflow file (or hook)")
+    p_gate.add_argument("--hooks", action="store_true",
+                        help="Instead of the workflow, install a pre-push hook that runs "
+                             "the check on every push from an agent's branch")
     p_gate.set_defaults(func=cmd_install_gate)
+
+    # next
+    p_next = subparsers.add_parser(
+        "next", help="Say the one thing to do now: commit the policy, install the gate, "
+                     "push an agent's work, open its pull request")
+    p_next.set_defaults(func=cmd_next)
+
+    # work
+    p_work = subparsers.add_parser(
+        "work", help="Start a coding agent inside an agent's worktree with its prompt: "
+                     "lanekeeper work agent-001 -- claude")
+    p_work.add_argument("agent", help="Agent ID or name")
+    p_work.add_argument("--print", dest="print_prompt", action="store_true",
+                        help="Only print the prompt")
+    p_work.add_argument("command", nargs=argparse.REMAINDER,
+                        help="The command to run in the worktree; the prompt is appended, "
+                             "or replaces {prompt} where it appears")
+    p_work.set_defaults(func=cmd_work)
+
+    # pr
+    p_pr = subparsers.add_parser(
+        "pr", help="Run the check, push the agent's branch and open its pull request "
+                   "with the lane label")
+    p_pr.add_argument("agent", help="Agent ID or name")
+    p_pr.add_argument("--title", help="Pull request title (default: the agent's task)")
+    p_pr.add_argument("--body", help="Pull request body")
+    p_pr.add_argument("--no-check", action="store_true",
+                      help="Push even if the local check is red, and let CI say so")
+    p_pr.set_defaults(func=cmd_pr)
 
     # open
     p_open = subparsers.add_parser("open", help="Open an agent's worktree in the configured editor")

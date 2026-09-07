@@ -173,8 +173,12 @@ class TestTheTicketIsTheBoundary(TicketSpawnTestCase):
         self.assertEqual(code, 0, out + err)
         cfg = load_config(self.root)
         self.assertEqual(list(cfg.lanes), ["feat-02"])
-        self.assertTrue((self.root / ".lanekeeper" / "capabilities" / "JR1.json").exists())
+        # No capability gates were asked for, so no seat cards are written (0.9.0): a
+        # person handing one ticket to one agent gets one lane and nothing else.
+        self.assertEqual(cfg.capability_gates, {})
+        self.assertFalse((self.root / ".lanekeeper" / "capabilities").exists())
         self.assertIn("first agent on this project", out)
+        self.assertNotIn("seat cards", out)
 
     def test_the_gate_reads_the_same_boundary(self):
         """The whole point: the lane the agent got is the lane `check` enforces."""

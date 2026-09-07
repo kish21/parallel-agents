@@ -337,9 +337,14 @@ def agent_prompt(lane: TicketLane) -> str:
     user watched one get the scope right and could not tell whether it would next
     time. A prompt the person pastes is deterministic in a way that hoping is not.
     """
-    files = ", ".join(lane.paths)
-    return (f"Implement {lane.issue.title or ('issue #' + str(lane.issue.ref))} "
-            f"(#{lane.issue.ref}). You may only create or modify these files: {files}. "
+    task = f"{lane.issue.title or ('issue #' + str(lane.issue.ref))} (#{lane.issue.ref})"
+    return build_prompt(task, lane.paths)
+
+
+def build_prompt(task: str, files: Sequence[str]) -> str:
+    """The one wording of the instruction, used by `spawn --ticket` and by `work`."""
+    listed = ", ".join(files)
+    return (f"Implement {task}. You may only create or modify these files: {listed}. "
             f"If the task needs a file that is not in that list, stop and say so instead "
             f"of editing it — a change outside the list is rejected before it can merge.")
 

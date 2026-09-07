@@ -10,6 +10,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.9.0] — 2026-09-07
+
+The question after 0.8.0 was how to make this easier for the developer. Every finding
+of the deep-test runs had one shape — the tool knew the next step and printed it for
+the person to do by hand — and 0.9.0 is that shape taken to its end. `spawn --ticket`
+was one command with five more described after it; those five are now done, offered,
+or one command each. Minor version: three new commands and a changed first run.
+
+### Added
+
+- **`lanekeeper next`** reads the state of the repository and says the one thing to do
+  now: hand out a ticket, commit the policy, install the gate, commit the workflow,
+  start an agent, check its uncommitted work, push and open its pull request, clean up.
+  Read-only. Printed at the end of every `spawn`.
+- **`lanekeeper pr <agent>`** runs the check on the agent's branch, pushes it, and
+  opens the pull request with its `lane: <name>` label through `gh` — the label
+  applied by the code that knows the lane, so it cannot be forgotten or mistyped. A red
+  change is not pushed (`--no-check` overrides and lets CI say so). Without `gh`, the
+  branch is pushed and the remaining steps are printed rather than lost; an existing
+  pull request gets the label.
+- **`lanekeeper work <agent> -- <command>`** starts the coding agent inside the
+  worktree with its prompt: `lanekeeper work agent-001 -- claude`. `{prompt}` in the
+  command is substituted; otherwise the prompt is the last argument. The prompt is
+  rebuilt from the policy, so a lane widened by `allow` since the spawn is what the
+  agent is told. `--print` only prints it.
+- **`lanekeeper install-gate --hooks`** installs a pre-push hook in the repository's
+  common hooks directory, so one install covers every worktree. It runs the check
+  before a push from a lanekeeper-made branch and leaves every other branch alone. A
+  hook that is not lanekeeper's is never overwritten without `--force`.
+- **`python -m lanekeeper`** is the module form (`lanekeeper.cli` still works); every
+  fallback line prints the short spelling.
+
+### Changed
+
+- **`spawn --ticket` on a terminal offers to install the gate the first time**, with one
+  question. `--no-gate` skips the offer; off a terminal nothing is asked.
+- **A ticket that names no files is proposed at once** on a terminal with Claude Code
+  on the PATH, instead of refused and re-run with `--propose`. Nothing is used without a
+  yes; off a terminal, or without Claude Code, the refusal stands.
+- **A fresh `spawn --ticket` project gets no capability gates and no seat cards.** A
+  person handing one ticket to one agent had four seat cards and two gates written
+  into their repository without asking. Both arrive the moment a gate is configured;
+  `init` still writes the starter set.
+
 ## [v0.8.0] — 2026-09-06
 
 The owner ran the deep-test protocol against published 0.7.12 and filed nineteen
