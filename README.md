@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.8.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.9.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -14,12 +14,13 @@ consulted where the safety promise is made.
 It is built to pair with [product-playbook](https://github.com/kish21/product-playbook),
 which writes the tickets. Product-playbook writes the work down; lanekeeper divides it up.
 
-> ### 👉 New here? Read **[Getting started](docs/getting-started.md)** instead of this page.
+> ### 👉 New here? Read **[Why lanekeeper](docs/why-lanekeeper.md)**, then **[Getting started](docs/getting-started.md)**, instead of this page.
 >
-> It answers the questions this page assumes you have already settled: whether
-> lanekeeper is for you at all, what you need installed, what to type first, what every
-> message means, what to do when the gate says no, and how to remove it again. Every
-> command on it is shown with its real output.
+> The first is the story: what goes wrong with three agents on one repository, and
+> what has to be true for it not to. The second answers the questions this page
+> assumes you have already settled: whether lanekeeper is for you at all, what you need
+> installed, what to type first, what every message means, what to do when the gate
+> says no, and how to remove it again. Every command on it is shown with its real output.
 >
 > The rest of *this* page is the reference: the lane file schema, capability gates,
 > ports, agent lifecycle, recovery.
@@ -47,13 +48,13 @@ so the install succeeds and the command does not exist. Everything works through
 module instead:
 
 ```powershell
-python -m lanekeeper.cli --version
+python -m lanekeeper --version
 ```
 
 To type `lanekeeper` as this page does, either define it for the session
 
 ```powershell
-function lanekeeper { python -m lanekeeper.cli @args }
+function lanekeeper { python -m lanekeeper @args }
 ```
 
 or add the Scripts folder to your user `PATH`:
@@ -760,12 +761,15 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
 | **`lanekeeper init`** | The escape hatch: writes a policy with lanes read from the directory layout — feature slices where the tree repeats a feature name on both sides of the stack, technology layers (with `--layers`, or as the fallback) where it does not. Use `start` unless you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
-| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a confirmed `--propose`); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. Reports an overlap with another lane before writing and asks on a terminal (`--accept-overlap` to skip); checks the remote for the branch name first (`--remote-branch continue\|rename\|ignore`). |
+| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a proposal you confirm — offered at once on a terminal with Claude Code available); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. Reports an overlap with another lane before writing and asks on a terminal (`--accept-overlap` to skip); checks the remote for the branch name first (`--remote-branch continue\|rename\|ignore`); offers to install the gate the first time (`--no-gate` to skip). A fresh project gets no capability gates or seat cards until asked. |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
 | **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name, the PR's labels, or (`--lane-from-branch`) a branch name lanekeeper made; a base branch; no agent state. Says which checkout it ran in. `--github` writes the verdict to the job summary and annotates blocked files. |
 | **`lanekeeper allow`** | Adds a path the gate blocked to a lane, without editing YAML. Inside a worktree the lane is the worktree's own. Refuses a path another lane claims, the policy files and shared zones. |
-| **`lanekeeper install-gate`** | Writes the GitHub Action that runs `check` on every pull request. Once per repository. |
+| **`lanekeeper install-gate`** | Writes the GitHub Action that runs `check` on every pull request. Once per repository. `--hooks` installs a pre-push hook instead, running the check before every push from an agent's branch and leaving other branches alone. |
+| **`lanekeeper next`** | Reads the repository's state and says the one thing to do now: commit the policy, install the gate, start an agent, push its work, open its pull request, clean up. |
+| **`lanekeeper work`** | Starts a coding agent inside an agent's worktree with its prompt: `lanekeeper work agent-001 -- claude`. `{prompt}` in the command is replaced; otherwise the prompt is the last argument. `--print` only prints it. |
+| **`lanekeeper pr`** | Runs the check, pushes the agent's branch and opens the pull request with its `lane:` label through `gh`. Refuses to push a red change (`--no-check` overrides). Without `gh`, pushes and prints the remaining steps. |
 | **`lanekeeper codeowners`** | Writes `.github/CODEOWNERS` from the lanes, inside managed markers, so GitHub routes reviews the same way the gate checks. `--check` fails instead of writing when the two have drifted. |
 | **`lanekeeper open`** | Opens an agent's worktree in the configured editor. |
 | **`lanekeeper board`** | Creates the GitHub project board (Lane, Owner, Seat, labels, milestones) from the configuration; `--show` reads the cards back. |

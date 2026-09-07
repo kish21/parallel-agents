@@ -3,7 +3,7 @@
 Project instructions and build state. Read this first; it exists so each session stops
 re-deriving the same decisions from the issue tracker.
 
-Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.7.12; v0.8.0 is in PR.
+Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.8.0; v0.9.0 is in PR.
 
 ---
 
@@ -649,6 +649,48 @@ doors into the same house, which is the thing #30's decision was meant to preven
 getting-started guide leads with `spawn --ticket` and `start` is documented as the
 whole-backlog path. If a future session finds users confused by having both, deleting
 `start` is the cheaper fix than building steps 3 and 5.
+
+---
+
+## Session of 2026-09-07: the steps around the one command — v0.9.0
+
+The owner asked how to make lanekeeper easier for developers, after 0.8.0 shipped and
+the deep-test protocol was rewritten for it. The answer given: the tool still knew the
+next step and described it for the person to do by hand. Built as one release with
+`tests/test_flow.py` (26 tests) and a new module `src/lanekeeper/flow.py`:
+
+- **`next`** (`flow.situation`) — read-only; ordered policy → gate → per-agent state,
+  using `merge_target()`, `rev-list --count`, and `branch_is_pushed`. Printed at the
+  end of every `spawn`.
+- **`pr`** (`flow.open_pull_request`) — check first, then `git push -u origin
+  HEAD:<branch>` from the worktree, then `gh label create --force` and `gh pr create
+  --label`, through the injected runner. A red change is not pushed. Without `gh` the
+  push still happens and the manual steps are returned as `manual`, never dropped.
+- **`work`** (`flow.prompt_for`, `command_with_prompt`, `run_in_worktree`) — the prompt
+  is rebuilt from the policy, not stored, so an `allow` since the spawn is honoured.
+  argparse's `REMAINDER` swallows `--print` typed after the agent name, so it is honoured
+  wherever it appears.
+- **`install-gate --hooks`** (`flow.hook_text`, `install_hook`) — written to
+  `--git-common-dir`/hooks so one install covers every worktree; guarded by a `case`
+  on the branch prefix so a hand-made branch is never blocked; a foreign hook is left
+  alone without `--force`.
+- **The gate offer and auto-propose** both go through `cli._interactive()`, and
+  `_propose_boundary` now does too (it used `sys.stdin.isatty()` directly, which the
+  tests could not patch). **A test trap:** patching `cli._interactive` and then
+  registering the cleanup with the already-patched value leaks the patch into every
+  later test in the process — capture the original first.
+- **No cards on a fresh project:** `cmd_spawn`'s no-config path clears
+  `capability_gates`, and `_first_time_setup` writes cards only when gates exist. The
+  first-agent message no longer mentions seat cards.
+- **`python -m lanekeeper`** via `__main__.py`; `invocation()` recognises it.
+
+**Not done, deliberately:** deleting `start` (the "two doors" risk recorded under
+v0.7.12) — the owner's call, not a session's. `pr` has run only against a bare
+repository and a fake `gh`.
+
+**The story document:** `docs/why-lanekeeper.md`, linked from the README's opening
+note and the guide's last section, and published as an artifact. It is the page to
+hand somebody who asks "why", before the page that says what to type.
 
 ---
 

@@ -22,8 +22,10 @@ from typing import Optional, Sequence
 #: The console-script entry point `pip` installs.
 SHIM = "lanekeeper"
 
-#: The form that works wherever the package is importable.
-MODULE_FORM = "python -m lanekeeper.cli"
+#: The form that works wherever the package is importable. `python -m lanekeeper`
+#: since 0.9.0 (`lanekeeper.cli` still works); the short spelling is the one a person
+#: who has just hit a wall should be handed.
+MODULE_FORM = "python -m lanekeeper"
 
 #: Set this to the command you actually type, when the process cannot tell. The README
 #: suggests a PowerShell function `lanekeeper` that runs the module form; inside it
@@ -53,7 +55,9 @@ def invocation(argv0: Optional[str] = None,
     name = Path(str(first or "").replace("\\", "/")).name.lower()
     if name.endswith(".exe"):
         name = name[:-4]
-    if name != "cli.py":
+    # `python -m lanekeeper` runs `__main__.py`; `python -m lanekeeper.cli` runs
+    # `cli.py`. Either way the person typed the module form, and gets it back short.
+    if name not in ("cli.py", "__main__.py"):
         return SHIM
     original = list(sys.orig_argv if orig_argv is None else orig_argv) \
         if (orig_argv is not None or hasattr(sys, "orig_argv")) else []
@@ -67,7 +71,7 @@ def invocation(argv0: Optional[str] = None,
         if head and (head.lower().startswith("python") or head.lower() == "py") \
                 and "/" not in head and "\\" not in head:
             interpreter = head
-    return f"{interpreter} -m lanekeeper.cli"
+    return f"{interpreter} -m lanekeeper"
 
 
 def fallback_line(inv: Optional[str] = None) -> str:

@@ -115,13 +115,13 @@ so `pip install` succeeds and the command does not exist. This is not a broken i
 Everything works through the module instead:
 
 ```powershell
-python -m lanekeeper.cli --version
+python -m lanekeeper --version
 ```
 
 To type `lanekeeper` the way this page does, define it for the session:
 
 ```powershell
-function lanekeeper { python -m lanekeeper.cli @args }
+function lanekeeper { python -m lanekeeper @args }
 ```
 
 Or add the Scripts folder to your user `PATH` permanently — `pip show -f lanekeeper`
@@ -164,7 +164,7 @@ lanekeeper spawn --ticket 2
 ```
 
 ```
-📁 Wrote .lanekeeper/config.yaml and the seat cards: this is the first agent on this project.
+📁 Wrote .lanekeeper/config.yaml: this is the first agent on this project.
 🎫 Ticket #2: [FEAT-02]: Automated Semantic Clustering Engine with Gemini & Mock Fallback (M2)
    Lane 'feat-02', bounded by the ticket's own file list:
      src/domain/contracts.ts
@@ -267,7 +267,7 @@ lanekeeper open agent-001        # opens the worktree in your editor (VS Code by
 ```
 
 `open` repeats the install line, and one more: *if `lanekeeper` is not found in that
-window, `python -m lanekeeper.cli` is the same program.* The window your editor opens
+window, `python -m lanekeeper` is the same program.* The window your editor opens
 carries the editor's `PATH`, not your terminal's, and on a Microsoft Store Python the
 shim is not on it. Every "run this next" line lanekeeper prints uses the form you
 started it with; set `LANEKEEPER_INVOCATION=lanekeeper` if you use the PowerShell
@@ -387,13 +387,17 @@ each blocked file is annotated on the Files tab:
 
 | You want to… | Run |
 | :--- | :--- |
+| Know what to do now | `lanekeeper next` |
 | Give a ticket to a new agent | `lanekeeper spawn --ticket 7` |
+| Start the agent in its worktree with its prompt | `lanekeeper work agent-002 -- claude` |
+| Check, push and open the labelled pull request | `lanekeeper pr agent-002` |
 | See every agent, lane and port | `lanekeeper status` |
 | Open an agent's worktree in your editor | `lanekeeper open agent-002` |
 | See what one agent changed, in lane / out of lane | `lanekeeper diff agent-002` |
 | Check one agent fully before its PR | `lanekeeper validate agent-002` |
 | Check any branch or PR against a lane | `lanekeeper check --lane feat-02 --base main` |
 | Put the gate on every PR, once per repo | `lanekeeper install-gate` |
+| Run the check before every push from an agent's branch | `lanekeeper install-gate --hooks` |
 | Route reviews by lane in GitHub | `lanekeeper codeowners --owner @you` |
 | Finish with an agent | `lanekeeper cleanup agent-002` |
 | Check nothing is stale or broken | `lanekeeper doctor` |
@@ -805,7 +809,7 @@ does not decide that your commits do not matter.
 
 | What you see | What it means | What to do |
 | :--- | :--- | :--- |
-| `lanekeeper: command not found` / `not recognized as the name of a cmdlet` | Installed, but not on `PATH`. Common on Microsoft Store Python. | `python -m lanekeeper.cli …`, or add the Scripts folder to `PATH` — see §4. |
+| `lanekeeper: command not found` / `not recognized as the name of a cmdlet` | Installed, but not on `PATH`. Common on Microsoft Store Python. | `python -m lanekeeper …`, or add the Scripts folder to `PATH` — see §4. |
 | `No lanekeeper configuration found` | Nothing set up here yet. Not a fault — it is telling you the first command. | With a ticket tracker: `lanekeeper spawn --ticket <number>`, which writes the configuration for you. Without one: §9, which starts from `lanekeeper init` and tells you what to check in what it wrote. |
 | `Must run inside a valid Git repository root` | You are in a subdirectory, or not in a repository. | `cd` to the root, or use `lanekeeper --repo <path>`. |
 | `Ticket #N names no files` | The ticket has no file list, so there is no boundary. | `--allow '<glob>'` (repeatable), or `--propose`. See §8. |
@@ -868,6 +872,9 @@ Both unverified items are tracked in the repository, and neither affects the gat
 
 ## 16. Where to go next
 
+- **[docs/why-lanekeeper.md](why-lanekeeper.md)** — the story: what goes wrong with
+  three agents on one repository, what has to be true for it not to, and what the gate,
+  the policy and a shared zone are, precisely.
 - The **[README](../README.md)** — the full reference: lane file schema, capability
   gates, ports, `.env` generation, agent lifecycle, recovery.
 - **[docs/codeowners.md](codeowners.md)** — why the generated CODEOWNERS is ordered the

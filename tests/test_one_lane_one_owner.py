@@ -138,7 +138,7 @@ class TestTheReadmeSaysWhatWindowsDoes(unittest.TestCase):
         install = readme.split("### 1. Install", 1)[1].split("### 2.", 1)[0]
         self.assertIn("pip install --upgrade lanekeeper", install)
         self.assertIn("not recognized", install)
-        self.assertIn("python -m lanekeeper.cli", install)
+        self.assertIn("python -m lanekeeper", install)
 
 
 if __name__ == "__main__":
