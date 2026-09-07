@@ -1193,9 +1193,22 @@ def _desk_notes(root: Path, worktree: Path) -> List[str]:
     return notes
 
 
+def _project_root() -> Path:
+    """The main checkout, from wherever the person is standing.
+
+    `work` and `check` put the person inside an agent's worktree on purpose, and
+    `next` exists to answer "what now" from there. The policy and the state live in
+    the main checkout, and a `StateManager` built on the worktree would create a
+    stray state directory in it and answer about nothing.
+    """
+    here = Path.cwd()
+    main = WorktreeManager.main_worktree_root()
+    return main if main is not None and main.resolve() != here.resolve() else here
+
+
 def cmd_next(args: argparse.Namespace) -> int:
     """`lanekeeper next`: the one thing to do now, read from the repository's state."""
-    root = Path.cwd()
+    root = _project_root()
     try:
         worktree_mgr = WorktreeManager(root)
     except GitError as e:
@@ -1223,7 +1236,7 @@ def cmd_next(args: argparse.Namespace) -> int:
 
 def cmd_work(args: argparse.Namespace) -> int:
     """`lanekeeper work <agent> -- <command>`: the agent, started with its prompt."""
-    root = Path.cwd()
+    root = _project_root()
     try:
         config = load_config(root)
         state_mgr = StateManager(root)
@@ -1240,11 +1253,18 @@ def cmd_work(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
     prompt = flow_mod.prompt_for(agent, config.lanes.get(agent.lane))
-    # argparse's REMAINDER swallows a flag typed after the agent name, so `--print`
-    # is honoured wherever it appears; a leading `--` is the separator, not a command.
-    command = [c for c in (args.command or []) if c != "--"]
-    print_only = getattr(args, "print_prompt", False) or "--print" in command
-    command = [c for c in command if c != "--print"]
+    # argparse's REMAINDER swallows a flag typed after the agent name, so `--print` is
+    # honoured before the `--` separator. After it, the words are the agent's own —
+    # `claude --print` is Claude Code's headless mode, not ours.
+    # Whether argparse keeps the literal `--` in the remainder depends on the Python
+    # version, so it is not relied on: the flags that lead are ours, and everything
+    # from the first word that is not a flag onward is the command, verbatim.
+    raw = [c for c in (args.command or []) if c != "--"]
+    cut = 0
+    while cut < len(raw) and raw[cut].startswith("--"):
+        cut += 1
+    ours, command = raw[:cut], raw[cut:]
+    print_only = getattr(args, "print_prompt", False) or "--print" in ours
     if print_only or not command:
         print(prompt)
         if not command:
@@ -1262,7 +1282,7 @@ def cmd_work(args: argparse.Namespace) -> int:
 
 def cmd_pr(args: argparse.Namespace) -> int:
     """`lanekeeper pr <agent>`: check, push, open the pull request with its label."""
-    root = Path.cwd()
+    root = _project_root()
     try:
         config = load_config(root)
         state_mgr = StateManager(root)
@@ -1355,7 +1375,11 @@ def _install_hook(force: bool = False) -> int:
         prefix = "parallel/"
     mgr = WorktreeManager(root)
     base = mgr.merge_target()
-    written = flow_mod.install_hook(root, mgr, prefix, base, force=force)
+    try:
+        written = flow_mod.install_hook(root, mgr, prefix, base, force=force)
+    except flow_mod.HookNotInstalled as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
     if written is None:
         print("ℹ️  A pre-push hook that is not lanekeeper's is already installed; left alone. "
               "Use --force to replace it.")

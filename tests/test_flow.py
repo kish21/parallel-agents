@@ -453,3 +453,120 @@ class TestTheFirstSpawn(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheReviewFindings(RepoWithRemote):
+    """What the code review of 0.9.0 found, each reproduced before it was fixed."""
+
+    def test_the_hook_is_written_with_lf_and_the_installing_interpreter(self):
+        self.policy()
+        run_cli(["install-gate", "--hooks"], cwd=self.root)
+        raw = (self.root / ".git" / "hooks" / "pre-push").read_bytes()
+        self.assertNotIn(b"\r\n", raw)
+        text = raw.decode("utf-8")
+        self.assertIn(sys.executable.split("/")[-1].split("\\")[-1], text)
+        self.assertIn("symbolic-ref -q --short refs/remotes/origin/HEAD", text)
+        self.assertNotIn("\n  python -m lanekeeper", text)
+
+    def test_a_hook_is_refused_when_there_is_no_base_to_compare_against(self):
+        with self.assertRaises(flow.HookNotInstalled):
+            flow.install_hook(self.root, self.mgr, "parallel/", "HEAD")
+
+    def test_print_after_the_separator_belongs_to_the_agent(self):
+        self.policy()
+        self.spawn()
+        stub = self.root.parent / "agent-stub.py"
+        stub.write_text("import sys, pathlib\n"
+                        "pathlib.Path(sys.argv[1]).write_text(' '.join(sys.argv[2:]))\n",
+                        encoding="utf-8")
+        record = self.root.parent / "record.txt"
+        res = run_cli(["work", "agent-001", "--", sys.executable, str(stub), str(record),
+                       "--print"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("--print", record.read_text(encoding="utf-8"), "claude's own flag")
+        res = run_cli(["work", "agent-001", "--print", "--", "no-such-agent-xyz"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("You may only create or modify", res.stdout)
+
+    def test_next_pr_and_work_answer_from_inside_a_worktree(self):
+        self.policy()
+        run_cli(["install-gate"], cwd=self.root)
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-qm", "gate")
+        wt = self.spawn()
+        self.commit_in(wt)
+        res = run_cli(["next"], cwd=wt)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("lanekeeper pr agent-001", res.stdout)
+        self.assertFalse((wt / ".lanekeeper" / "state").exists(), "no stray state directory")
+        res = run_cli(["work", "agent-001", "--print"], cwd=wt)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        res = run_cli(["pr", "agent-001", "--no-check"], cwd=wt)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("Pushed", res.stdout)
+
+    def test_uninit_removes_the_hook_it_installed(self):
+        self.policy()
+        run_cli(["install-gate", "--hooks"], cwd=self.root)
+        hook = self.root / ".git" / "hooks" / "pre-push"
+        self.assertTrue(hook.exists())
+        res = run_cli(["uninit", "--force"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        self.assertIn("pre-push hook", res.stdout)
+        self.assertFalse(hook.exists())
+
+    def test_uninit_leaves_somebody_elses_hook(self):
+        self.policy()
+        hooks = self.root / ".git" / "hooks"
+        hooks.mkdir(exist_ok=True)
+        (hooks / "pre-push").write_text("#!/bin/sh\necho mine\n", encoding="utf-8")
+        run_cli(["uninit", "--force"], cwd=self.root)
+        self.assertTrue((hooks / "pre-push").exists())
+
+    def test_a_gh_that_hangs_after_the_push_is_a_printed_step_not_a_traceback(self):
+        self.policy()
+        wt = self.spawn()
+        self.commit_in(wt)
+        agent = StateManager(self.root).get_agent("agent-001")
+
+        def runner(argv):
+            if argv[1:3] == ["label", "create"]:
+                return CommandResult(0, "", "")
+            raise subprocess.TimeoutExpired(argv, 120)
+
+        out = flow.open_pull_request(agent, self.mgr, base="main", gh="gh", runner=runner)
+        self.assertTrue(out.pushed)
+        self.assertIn("Pushed", out.lines[0])
+        self.assertTrue(out.manual)
+
+    def test_the_prompt_is_the_same_wording_in_both_places(self):
+        from lanekeeper import ticket as ticket_mod
+        lane = LaneConfig("feat-02", allow=["src/a.py"])
+        agent = AgentState(id="agent-001", name="w", seat="JR1", lane="feat-02",
+                           task="#2 Thing", branch="b", worktree_path="/w")
+        via_work = flow.prompt_for(agent, lane)
+        via_spawn = ticket_mod.build_prompt("#2 Thing", ["src/a.py"])
+        self.assertEqual(via_work, via_spawn)
+
+    def test_the_most_urgent_agent_comes_first(self):
+        self.policy()
+        run_cli(["install-gate"], cwd=self.root)
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-qm", "gate")
+        self.spawn()   # agent-001: not started
+        cfg = load_config(self.root)
+        cfg.lanes["feat-03"] = LaneConfig("feat-03", allow=["lib/**"])
+        save_config(cfg, self.root)
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-qm", "lane")
+        res = run_cli(["spawn", "--lane", "feat-03", "--task", "t"], cwd=self.root)
+        self.assertEqual(res.returncode, 0, output_of(res))
+        wt2 = self.root / ".lanekeeper" / "worktrees" / "agent-002"
+        (wt2 / "lib").mkdir()
+        (wt2 / "lib" / "x.py").write_text("x\n", encoding="utf-8")
+        _git(wt2, "add", "-A")
+        _git(wt2, "commit", "-qm", "work")
+        res = run_cli(["next"], cwd=self.root)
+        first = res.stdout.split("Then:")[0]
+        self.assertIn("lanekeeper pr agent-002", first)
+        self.assertNotIn("agent-001", first)

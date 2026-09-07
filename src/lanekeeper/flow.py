@@ -96,11 +96,16 @@ def situation(root: Path, config: Optional[Config], agents: Sequence[AgentState]
 
     base = worktree_mgr.merge_target()
     live = [a for a in agents if a.status not in TERMINAL_STATUSES]
+    # (urgency, step): what is closest to a merged pull request comes first, whatever
+    # order the agents were spawned in — a missing worktree, then unpushed commits,
+    # then uncommitted work, then an agent that has not started, then one whose
+    # branch is already up.
+    ranked: List[tuple] = []
     for agent in live:
         wt = Path(agent.worktree_path)
         if not wt.exists():
-            out.steps.append(Step(f"{agent.id}'s worktree is missing.", f"{inv} doctor",
-                                  agent=agent.id))
+            ranked.append((0, Step(f"{agent.id}'s worktree is missing.", f"{inv} doctor",
+                                   agent=agent.id)))
             continue
         ahead = _commits_ahead(worktree_mgr, agent.branch, base)
         if ahead is None:
@@ -109,27 +114,29 @@ def situation(root: Path, config: Optional[Config], agents: Sequence[AgentState]
         if ahead == 0:
             dirty = worktree_mgr.has_uncommitted_changes(wt)
             if dirty:
-                out.steps.append(Step(
+                ranked.append((2, Step(
                     f"{agent.id} has uncommitted work in its worktree. Check it, then commit.",
                     f"cd {_short(wt, root)} && {inv} check --lane {agent.lane} --base {base} "
-                    f"--working-tree", agent=agent.id))
+                    f"--working-tree", agent=agent.id)))
             else:
-                out.steps.append(Step(
+                ranked.append((3, Step(
                     f"{agent.id} has not started: no commits yet on {agent.branch}. Start "
                     f"the agent with its prompt.",
-                    f"{inv} work {agent.id} -- claude", agent=agent.id))
+                    f"{inv} work {agent.id} -- claude", agent=agent.id)))
             continue
         pushed = worktree_mgr.branch_is_pushed(agent.branch)
         if not pushed:
-            out.steps.append(Step(
+            ranked.append((1, Step(
                 f"{agent.id} has {ahead} commit(s) not yet on the remote. Check, push and "
                 f"open the pull request in one go.",
-                f"{inv} pr {agent.id}", agent=agent.id))
+                f"{inv} pr {agent.id}", agent=agent.id)))
         else:
-            out.steps.append(Step(
+            ranked.append((4, Step(
                 f"{agent.id}'s branch is pushed. If its pull request is open and green, "
                 f"merge it; then clean up.",
-                f"{inv} cleanup {agent.id}", agent=agent.id))
+                f"{inv} cleanup {agent.id}", agent=agent.id)))
+    ranked.sort(key=lambda r: r[0])
+    out.steps.extend(step for _, step in ranked)
     if not live and config.lanes and not out.steps:
         out.notes.append("No live agents. Hand out the next ticket with "
                          f"'{inv} spawn --ticket <number>'.")
@@ -194,11 +201,10 @@ def prompt_for(agent: AgentState, lane: Optional[LaneConfig]) -> str:
     the spawn, and the prompt handed to the agent should carry the boundary the gate
     will actually check.
     """
-    files = ", ".join(lane.allow) if lane is not None else "(see .lane)"
+    from .ticket import build_prompt
+    files = list(lane.allow) if lane is not None else ["(see .lane)"]
     task = agent.task or f"the task for agent {agent.id}"
-    return (f"Implement {task}. You may only create or modify these files: {files}. "
-            f"If the task needs a file that is not in that list, stop and say so instead "
-            f"of editing it — a change outside the list is rejected before it can merge.")
+    return build_prompt(task, files)
 
 
 def command_with_prompt(command: Sequence[str], prompt: str) -> List[str]:
@@ -258,28 +264,37 @@ def open_pull_request(agent: AgentState, worktree_mgr: WorktreeManager, base: st
     out.lines.append(f"⬆️  Pushed {agent.branch} to {remote}.")
 
     run = runner or _subprocess_runner(wt)
-    argv = [gh, "label", "create", out.label, "--color", "0e8a16",
-            "--description", "Lanekeeper lane", "--force"]
-    try:
-        res = run(argv)
-    except (OSError, subprocess.SubprocessError) as e:
-        out.manual.append(f"Open the pull request for {agent.branch} and label it "
-                          f"'{out.label}' — '{gh}' could not be run ({e}).")
+
+    def call(argv: Sequence[str]) -> Optional[CommandResult]:
+        # Every `gh` call, not only the first: a timeout or a missing binary after the
+        # push has already happened must become a printed step, never a traceback that
+        # swallows the line saying the branch is up.
+        try:
+            return run(argv)
+        except (OSError, subprocess.SubprocessError) as e:
+            out.manual.append(f"Open the pull request for {agent.branch} and label it "
+                              f"'{out.label}' — '{gh}' could not be run ({e}).")
+            return None
+
+    res = call([gh, "label", "create", out.label, "--color", "0e8a16",
+                "--description", "Lanekeeper lane", "--force"])
+    if res is None:
         return out
     if res.returncode != 0:
         out.manual.append(f"Create the label '{out.label}' by hand — '{gh} label create' "
                           f"failed: {(res.stderr or '').strip()[:160]}")
-    argv = [gh, "pr", "create", "--head", agent.branch, "--base", base,
-            "--label", out.label, "--title", title or agent.task or agent.branch,
-            "--body", body or ""]
-    res = run(argv)
+    res = call([gh, "pr", "create", "--head", agent.branch, "--base", base,
+                "--label", out.label, "--title", title or agent.task or agent.branch,
+                "--body", body or ""])
+    if res is None:
+        return out
     if res.returncode != 0:
         detail = (res.stderr or res.stdout or "").strip()
         if "already exists" in detail.lower():
             out.lines.append(f"ℹ️  A pull request for {agent.branch} already exists; make "
                              f"sure it carries the label '{out.label}'.")
-            edit = run([gh, "pr", "edit", agent.branch, "--add-label", out.label])
-            if edit.returncode == 0:
+            edit = call([gh, "pr", "edit", agent.branch, "--add-label", out.label])
+            if edit is not None and edit.returncode == 0:
                 out.lines.append(f"🏷️  Label '{out.label}' applied.")
             return out
         out.manual.append(f"Open the pull request for {agent.branch} and label it "
@@ -311,16 +326,23 @@ def _subprocess_runner(cwd: Path) -> CommandRunner:
 HOOK_MARK = "# lanekeeper pre-push hook"
 
 
-def hook_text(branch_prefix: str, base: str) -> str:
+def hook_text(branch_prefix: str, base: str, interpreter: str = "") -> str:
     """The pre-push hook: the check, on lanekeeper's branches only.
 
     Only those — a branch the person made by hand has no lane in its name, and
     `check` would refuse it, which is right for CI and wrong for a hook that would
     then block every push from the repository. The check reads the lane from the
-    branch, so there is nothing to type and nothing to get wrong. `python -m
-    lanekeeper` is the fallback for the shim not being on PATH.
+    branch, so there is nothing to type and nothing to get wrong.
+
+    Two things are decided at push time, not install time. The base is the remote's
+    HEAD when the clone knows it, so a default branch renamed after the install is
+    still the one compared against; the name baked in is the fallback. And the
+    fallback interpreter is the one that ran the install, by absolute path: a bare
+    `python` is not on the PATH of a push made from an editor's source-control panel,
+    and a hook that cannot start is a push refused for a reason nobody asked for.
     """
     prefix = branch_prefix.rstrip("/") + "/"
+    python = shlex.quote(interpreter or sys.executable)
     return f"""#!/usr/bin/env sh
 {HOOK_MARK} — written by `lanekeeper install-gate --hooks`; delete this file to remove it.
 # Runs the lane check before a push from an agent's branch. Branches lanekeeper did
@@ -330,12 +352,18 @@ case "$branch" in
   {prefix}*) ;;
   *) exit 0 ;;
 esac
+base="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)"
+[ -n "$base" ] || base="{base}"
 if command -v lanekeeper >/dev/null 2>&1; then
-  lanekeeper check --lane-from-branch --base "{base}"
+  lanekeeper check --lane-from-branch --base "$base"
 else
-  python -m lanekeeper check --lane-from-branch --base "{base}"
+  {python} -m lanekeeper check --lane-from-branch --base "$base"
 fi
 """
+
+
+class HookNotInstalled(RuntimeError):
+    """The hook could not be written safely, with the reason."""
 
 
 def install_hook(root: Path, worktree_mgr: WorktreeManager, branch_prefix: str,
@@ -345,8 +373,14 @@ def install_hook(root: Path, worktree_mgr: WorktreeManager, branch_prefix: str,
     The common directory, so one install covers the main checkout and every agent
     worktree — git reads hooks from there for all of them. An existing hook that is
     not ours is never overwritten without `force`; a person's own pre-push is theirs.
-    Returns None when it was left alone.
+    Returns None when it was left alone. Refuses a base of `HEAD`: that is
+    `merge_target()` having found nothing to compare against, and a hook that diffs a
+    branch against itself passes every push.
     """
+    if not base or base == "HEAD":
+        raise HookNotInstalled(
+            "No base branch to compare against: this clone has no origin/HEAD and no "
+            "main or master. Set one (git remote set-head origin -a), then run again.")
     res = worktree_mgr._run_git(["rev-parse", "--git-common-dir"], check=False)
     common = Path((res.stdout or "").strip() or ".git")
     if not common.is_absolute():
@@ -361,7 +395,10 @@ def install_hook(root: Path, worktree_mgr: WorktreeManager, branch_prefix: str,
             ours = False
         if not ours:
             return None
-    target.write_text(hook_text(branch_prefix, base), encoding="utf-8")
+    # LF on every platform: git runs the hook through sh, and a CRLF `esac` is a
+    # syntax error that refuses every push on Windows.
+    with open(target, "w", encoding="utf-8", newline="\n") as f:
+        f.write(hook_text(branch_prefix, base))
     try:
         target.chmod(target.stat().st_mode | 0o111)
     except OSError:

@@ -657,7 +657,7 @@ whole-backlog path. If a future session finds users confused by having both, del
 The owner asked how to make lanekeeper easier for developers, after 0.8.0 shipped and
 the deep-test protocol was rewritten for it. The answer given: the tool still knew the
 next step and described it for the person to do by hand. Built as one release with
-`tests/test_flow.py` (26 tests) and a new module `src/lanekeeper/flow.py`:
+`tests/test_flow.py` (33 tests) and a new module `src/lanekeeper/flow.py`:
 
 - **`next`** (`flow.situation`) — read-only; ordered policy → gate → per-agent state,
   using `merge_target()`, `rev-list --count`, and `branch_is_pushed`. Printed at the
@@ -668,8 +668,10 @@ next step and described it for the person to do by hand. Built as one release wi
   push still happens and the manual steps are returned as `manual`, never dropped.
 - **`work`** (`flow.prompt_for`, `command_with_prompt`, `run_in_worktree`) — the prompt
   is rebuilt from the policy, not stored, so an `allow` since the spawn is honoured.
-  argparse's `REMAINDER` swallows `--print` typed after the agent name, so it is honoured
-  wherever it appears.
+  argparse's `REMAINDER` swallows `--print` typed after the agent name, and whether it
+  keeps the literal `--` depends on the Python version, so neither is relied on: the
+  flags that *lead* are ours, and everything from the first non-flag word onward is the
+  command verbatim — `claude --print` is Claude Code's headless mode, not ours.
 - **`install-gate --hooks`** (`flow.hook_text`, `install_hook`) — written to
   `--git-common-dir`/hooks so one install covers every worktree; guarded by a `case`
   on the branch prefix so a hand-made branch is never blocked; a foreign hook is left
@@ -683,6 +685,19 @@ next step and described it for the person to do by hand. Built as one release wi
   `capability_gates`, and `_first_time_setup` writes cards only when gates exist. The
   first-agent message no longer mentions seat cards.
 - **`python -m lanekeeper`** via `__main__.py`; `invocation()` recognises it.
+
+**The code review found nine, all reproduced first** (`TestTheReviewFindings`). The
+three worth remembering: the hook was written with the platform newline, so on Windows
+`sh` read `#!/bin/sh\r` and every push from an agent branch failed with a message
+blaming the hook; the hook baked `main` in at install time and fell back to a bare
+`python` that is not the interpreter lanekeeper runs under, so it now resolves the base
+from `refs/remotes/origin/HEAD` at push time and quotes `sys.executable`; and `next`,
+`work` and `pr` read `Path.cwd()` as the project root, so run from inside a worktree
+(where the prompt tells the agent to be) they found no agents. `_project_root()` walks
+to the main checkout. The rest: every `gh` call is guarded so a timeout becomes a manual
+step rather than a traceback; `uninit` removes the hook; `spawn` and `work` build the
+prompt from one function so the wording cannot drift; the most urgent agent is listed
+first; `install_hook` refuses a base of `HEAD`.
 
 **Not done, deliberately:** deleting `start` (the "two doors" risk recorded under
 v0.7.12) — the owner's call, not a session's. `pr` has run only against a bare
