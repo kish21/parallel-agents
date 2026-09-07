@@ -47,6 +47,22 @@ class LaneConfig:
     #: permanent state that needs enforcing, so it gets a lane whose owner is nobody on
     #: purpose. A change touching it is escalated, not rejected as out-of-lane. #25.
     shared: bool = False
+    #: Where this lane came from, all optional and all absent by default so a
+    #: configuration written before they existed loads unchanged (#70). A lane used
+    #: to record only its name and its paths: nothing said which ticket it was for,
+    #: whether the paths were stated by the filer or proposed by a model and nodded
+    #: through, or whether the work was still going on. `ticket` is the tracker's own
+    #: reference — `2`, or a URL — written by `spawn --ticket` and `divide --confirm`
+    #: and never invented. `paths_from` mirrors `divide.models.PathSource`: `ticket`,
+    #: `flag` (a person's `--allow`) or `proposed` (an advisor's answer, accepted).
+    ticket: str = ""
+    paths_from: str = ""
+    #: A lane whose work is finished. Set by a person, never by the tool: a closed
+    #: ticket does not mean the lane is done, and silently narrowing enforcement is
+    #: the one failure the gate must not have. Retiring is bookkeeping — the collision
+    #: report and CODEOWNERS skip a retired lane, the gate's verdict for it is
+    #: unchanged, and nobody is spawned into it without being told.
+    retired: bool = False
 
 
 @dataclass
@@ -302,6 +318,13 @@ class Config:
     editor: EditorConfig = field(default_factory=EditorConfig)
     board: BoardConfig = field(default_factory=BoardConfig)
     codeowners: CodeownersConfig = field(default_factory=CodeownersConfig)
+    #: Paths a build writes, which the gate therefore ignores in every lane (#63):
+    #: `*.tsbuildinfo`, coverage output, a lockfile an unrelated install rewrote. Empty
+    #: by default — nothing is ignored unless the project says so — and settable only
+    #: here, in the file no lane may edit, so an agent cannot exempt a file from inside
+    #: its own pull request. A built-in list of "common artifacts" was rejected: the
+    #: gate's value is that it has no opinions.
+    generated: List[str] = field(default_factory=list)
 
     def get_lane(self, lane_name: str) -> LaneConfig:
         """Returns the declared lane, or raises UnknownLaneError.
@@ -382,7 +405,24 @@ class Config:
             },
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, minimal: bool = False) -> Dict[str, Any]:
+        """The configuration as `config.yaml` holds it.
+
+        `minimal` writes only what differs from the defaults (#68). The exhaustive form
+        wrote every default there is — 25 container names, 35 generic directories, six
+        intake thresholds — so the ten lines a person cares about sat inside 180 they
+        never chose, every policy change was a 180-line diff, and a default written
+        into the file was frozen at the version that wrote it, silently and forever.
+        `load_config` fills whatever is missing from the *current* defaults, so a file
+        holding only the lanes loads to the same `Config` and picks up improved
+        defaults on upgrade. Hand-written values differ by definition, so they stay.
+        """
+        full = self._full_dict()
+        if not minimal:
+            return full
+        return minimal_dict(full)
+
+    def _full_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
             "project": {"name": self.project_name},
@@ -399,9 +439,13 @@ class Config:
                     # as it did before these existed.
                     **({"owner": list(lane.owner)} if lane.owner else {}),
                     **({"shared": True} if lane.shared else {}),
+                    **({"ticket": lane.ticket} if lane.ticket else {}),
+                    **({"paths_from": lane.paths_from} if lane.paths_from else {}),
+                    **({"retired": True} if lane.retired else {}),
                 }
                 for lane in self.lanes.values()
             ],
+            **({"generated": list(self.generated)} if self.generated else {}),
             "ports": {
                 name: {"start": p_range.start, "end": p_range.end}
                 for name, p_range in self.port_ranges.items()
@@ -569,11 +613,77 @@ class Config:
                 default_owner=owner_list(
                     "codeowners.default_owner", codeowners_data.get("default_owner")),
             ),
+            generated=_generated_patterns(data.get("generated")),
         )
+
+
+#: Keys written whatever their value: the file has to say what it is and whose it is.
+ALWAYS_WRITTEN = ("version", "project")
+
+
+def minimal_dict(full: Dict[str, Any]) -> Dict[str, Any]:
+    """`full` with every value that equals what `from_dict` would fill in removed.
+
+    The baseline is `Config.from_dict({})` — what a *missing* key becomes — and not
+    `Config.default()`, which is the starter policy `init` writes with its stock lanes
+    and port ranges. Comparing against the wrong one would drop a port range that a
+    missing key does not restore, and the minimal file would load to a different
+    configuration from the exhaustive one. A test pins that the two load the same.
+    """
+    baseline = Config.from_dict({})._full_dict()
+    return _strip_equal(full, baseline, top=True)
+
+
+def _strip_equal(value: Any, default: Any, top: bool = False) -> Any:
+    if isinstance(value, dict) and isinstance(default, dict):
+        out: Dict[str, Any] = {}
+        for key, item in value.items():
+            if top and key in ALWAYS_WRITTEN:
+                out[key] = item
+                continue
+            if key not in default:
+                out[key] = item
+                continue
+            kept = _strip_equal(item, default[key])
+            if kept is _OMIT:
+                continue
+            out[key] = kept
+        if not out and not top:
+            return _OMIT
+        return out
+    return _OMIT if value == default else value
+
+
+class _Omit:
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<omit>"
+
+
+_OMIT = _Omit()
 
 
 #: The lane name `check` uses for a change to the policy files. Not declarable.
 RESERVED_LANE_NAME = "policy"
+
+
+def _generated_patterns(raw: Any) -> List[str]:
+    """The `generated:` list, refused rather than guessed at when it is not a list."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        raise InvalidLaneError(
+            f"'generated' must be a list of patterns, one per line, not the single "
+            f"string {raw!r}.")
+    if not isinstance(raw, list):
+        raise InvalidLaneError(
+            f"'generated' must be a list of patterns (found {type(raw).__name__}).")
+    return [str(p).strip() for p in raw if p is not None and str(p).strip()]
+
+#: What `LaneConfig.paths_from` may say. The same three answers `divide` already
+#: distinguishes the moment a boundary is read; this keeps the distinction once
+#: written down, so a path argued over on a ticket and a path a model suggested at
+#: six in the evening do not render identically to whoever reads the file later.
+PATH_SOURCES = ("ticket", "flag", "proposed")
 
 
 class InvalidLaneError(ValueError):
@@ -659,8 +769,21 @@ def _parse_lane(lane_name: str, raw: Any) -> LaneConfig:
         raise InvalidLaneError(
             f"Lane '{lane_name}': 'shared' must be true or false, not {shared!r}. "
             f"A shared lane is one nobody is spawned into.")
+    retired = raw.get("retired", False)
+    if not isinstance(retired, bool):
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': 'retired' must be true or false, not {retired!r}.")
+    paths_from = str(raw.get("paths_from") or "").strip().lower()
+    if paths_from and paths_from not in PATH_SOURCES:
+        raise InvalidLaneError(
+            f"Lane '{lane_name}': 'paths_from' must be one of "
+            f"{', '.join(PATH_SOURCES)}, not {paths_from!r}. It records whether the "
+            f"paths were stated on the ticket, typed with --allow, or proposed by an "
+            f"advisor and accepted.")
+    ticket = raw.get("ticket")
     return LaneConfig(name=lane_name, allow=allow, deny=deny, shared=shared,
-                      owner=owner)
+                      owner=owner, retired=retired, paths_from=paths_from,
+                      ticket="" if ticket is None else str(ticket).strip())
 
 
 class InvalidIntakeSettingError(ValueError):
@@ -877,10 +1000,20 @@ def load_config(root_dir: Optional[Path] = None) -> Config:
     return Config.from_dict(data)
 
 
-def save_config(config: Config, root_dir: Optional[Path] = None) -> Path:
+def save_config(config: Config, root_dir: Optional[Path] = None,
+                minimal: bool = True) -> Path:
+    """Writes the policy file, in the minimal form unless told otherwise (#68).
+
+    Every write is a whole-file write, so an exhaustive file written by an earlier
+    release shrinks the next time lanekeeper has a reason to write it — a lane added
+    by `spawn --ticket`, a path added by `allow`. It loads to the same configuration;
+    a value that was hand-set, or that an old default left different from the current
+    one, is kept because it differs.
+    """
     root = root_dir or Path.cwd()
     cfg_file = paths.config_path(root)
     cfg_file.parent.mkdir(parents=True, exist_ok=True)
     with open(cfg_file, "w", encoding="utf-8") as f:
-        yaml.safe_dump(config.to_dict(), f, sort_keys=False, default_flow_style=False)
+        yaml.safe_dump(config.to_dict(minimal=minimal), f, sort_keys=False,
+                       default_flow_style=False)
     return cfg_file

@@ -190,7 +190,7 @@ def render(plan: UninitPlan) -> str:
         lines.append(f"  - the worktree {_display(plan.root, wt)}")
     if plan.branches:
         lines.append(f"  - {len(plan.branches)} agent branch(es), "
-                     f"but only the ones git agrees are fully merged:")
+                     f"but only the ones merged into the base branch:")
         for b in plan.branches:
             lines.append(f"      {b}")
     if plan.home is not None:
@@ -279,19 +279,25 @@ def _remove_worktrees_and_branches(plan: UninitPlan,
         except (GitError, OSError):
             pass
 
+    # The same rule as `cleanup` (#65): merged into the base, asked of git directly.
+    # A branch that is pushed but not merged is kept, and the message says where its
+    # commits are, because "pushed to origin" and "nowhere but here" are different risks.
+    base = worktree_mgr.merge_target()
     kept: List[str] = []
     deleted: List[str] = []
     for branch in plan.branches:
-        if worktree_mgr.delete_branch(branch):
+        if worktree_mgr.delete_branch(branch, base=base):
             deleted.append(branch)
         else:
             kept.append(branch)
     if deleted:
-        done.append(f"Deleted {len(deleted)} merged branch(es): {', '.join(deleted)}.")
+        done.append(f"Deleted {len(deleted)} branch(es) merged into {base}: "
+                    f"{', '.join(deleted)}.")
     if kept:
-        done.append(f"Kept {len(kept)} branch(es) git would not delete — they hold commits "
-                    f"nobody has merged, or one of them is checked out: {', '.join(kept)}.")
-        done.append("   Delete those yourself with 'git branch -D <name>' when you are sure.")
+        done.append(f"Kept {len(kept)} branch(es) not merged into {base} — they hold "
+                    f"commits nobody has merged, or one of them is checked out:")
+        for branch in kept:
+            done.append("   " + worktree_mgr.describe_kept_branch(branch, base))
 
     return done
 

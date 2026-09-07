@@ -26,6 +26,10 @@ def cli_env():
     env["PYTHONPATH"] = str(SRC_DIR) + (os.pathsep + existing if existing else "")
     # Force UTF-8 in the child so its emoji output survives on Windows consoles.
     env["PYTHONIOENCODING"] = "utf-8"
+    # The child is started as `python -m lanekeeper.cli`, so its "run this next" lines
+    # would name that form (#76). The suite asserts what a person using the installed
+    # shim sees; a test of the other form sets this itself.
+    env.setdefault("LANEKEEPER_INVOCATION", "lanekeeper")
     return env
 
 

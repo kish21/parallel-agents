@@ -1,6 +1,6 @@
 # Lanekeeper ⚡
 
-[![Version](https://img.shields.io/badge/version-v0.7.12-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.8.0-blue.svg)](https://github.com/kish21/parallel-agents/blob/main/CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/kish21/parallel-agents/blob/main/LICENSE)
 
 **Run several AI coding agents on one repository without them colliding.**
@@ -194,19 +194,44 @@ $ lanekeeper spawn --ticket 12 --open
 
   • When the agent opens its pull request, label it 'lane: feat-02'. The gate fails
     the change if any file is outside the lane.
+
+▶ Now do the work. Lanekeeper has prepared the desk; it does not write code.
+
+  1. Once per worktree, install the dependencies — a worktree is a fresh
+     checkout, so it has none (package-lock.json says how):
+            cd .lanekeeper/worktrees/agent-001 && npm ci
+  2. In .lanekeeper/worktrees/agent-001 — the editor window that just opened is already
+     there — start your coding agent: claude, cursor, whatever you use.
+  …
 ```
 
-Commit the policy it wrote (`git add .lanekeeper .gitignore`) before the agent commits
-anything: until you do, the agent's first `git add -A` sweeps the policy into its own
-branch, where the gate denies it — a policy change is its own lane. `spawn --ticket`
-says so when the policy is still uncommitted.
+Commit the policy it wrote (`git add .lanekeeper .gitignore`) before you commit
+anything else, in your main checkout and on whatever branch you are on, landed as a
+pull request labelled `lane: policy`. `spawn --ticket` says so, naming your branch,
+while the policy is still uncommitted. The file it writes holds only the lanes and
+whatever differs from the defaults, and each lane records its `ticket:` and where its
+paths came from (`paths_from: ticket | flag | proposed`); `retired: true` on a lane
+takes it out of the collision report and CODEOWNERS without changing the gate.
+
+Before the worktree is created, `spawn` asks the remote whether that branch name
+already exists — an earlier session's open pull request, typically — and refuses with
+the three ways forward (`--remote-branch continue | rename | ignore`) rather than
+letting the collision surface at `git push`.
 
 The file list is the ticket's *Allowed File Paths* or *Target Modules* section. A
 ticket that names no files is refused, never guessed at: say the files yourself with
 `--allow 'src/checkout/**'`, or run `--propose` to have Claude Code suggest them from
-the ticket and the tree, shown to you before they are used. If another lane could
-touch the same files, it says so and lets you decide. On a project with no policy
-yet, this first command writes one containing only this lane.
+the ticket and the tree, shown to you before they are used (a file that does not exist
+yet is widened to its existing directory, and the proposal says which lines were). If
+another lane could touch the same files, it says so **before writing anything**, says
+that both agents' checks would pass, names `shared: true` with the exact edit, and on
+a terminal asks whether to proceed, write the shared zone, or stop. On a project with
+no policy yet, this first command writes one containing only this lane.
+
+When the gate blocks a file the ticket forgot, the message offers the one command that
+records the decision — `lanekeeper allow --lane feat-02 <path>` — which refuses a path
+another lane claims, the policy files and shared zones. A tracked build artifact that
+would trip every lane goes under `generated:` in the policy, once.
 
 ### What it does not do
 
@@ -735,10 +760,11 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper intake`** | The same check on its own: is the work written down, and does it cover the features? |
 | **`lanekeeper init`** | The escape hatch: writes a policy with lanes read from the directory layout — feature slices where the tree repeats a feature name on both sides of the stack, technology layers (with `--layers`, or as the fallback) where it does not. Use `start` unless you already know your lanes. |
 | **`lanekeeper doctor`** | Diagnoses repository, worktree, and port health. |
-| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a confirmed `--propose`); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. |
+| **`lanekeeper spawn`** | Provisions an isolated worktree, branch, `.env`, and allocated ports. `--ticket N` makes the ticket the boundary (its file list, `--allow`, or a confirmed `--propose`); with `board.read: true` the card's Lane and Seat win. `--open` opens the editor. Reports an overlap with another lane before writing and asks on a terminal (`--accept-overlap` to skip); checks the remote for the branch name first (`--remote-branch continue\|rename\|ignore`). |
 | **`lanekeeper status`** | Shows active agents, lanes, and allocated ports (`--json` supported). |
 | **`lanekeeper validate`** | Mechanically validates lane compliance and runs test suites. |
-| **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name or the PR's labels, a base branch, no agent state. |
+| **`lanekeeper check`** | The same lane check as a pull-request gate: a lane name, the PR's labels, or (`--lane-from-branch`) a branch name lanekeeper made; a base branch; no agent state. Says which checkout it ran in. `--github` writes the verdict to the job summary and annotates blocked files. |
+| **`lanekeeper allow`** | Adds a path the gate blocked to a lane, without editing YAML. Inside a worktree the lane is the worktree's own. Refuses a path another lane claims, the policy files and shared zones. |
 | **`lanekeeper install-gate`** | Writes the GitHub Action that runs `check` on every pull request. Once per repository. |
 | **`lanekeeper codeowners`** | Writes `.github/CODEOWNERS` from the lanes, inside managed markers, so GitHub routes reviews the same way the gate checks. `--check` fails instead of writing when the two have drifted. |
 | **`lanekeeper open`** | Opens an agent's worktree in the configured editor. |
@@ -751,8 +777,8 @@ swapping vendors edits one field and changes nothing else.
 | **`lanekeeper restart`** | Restarts an agent in its worktree. |
 | **`lanekeeper repair`** | Repairs stale states and releases orphaned ports. |
 | **`lanekeeper declare`** | Generates the PR gate declaration from recorded state. |
-| **`lanekeeper cleanup`** | Safely removes worktrees and releases port allocations. Deletes the agent's branch when git agrees it is fully merged, and keeps it — saying so — when it is not. |
-| **`lanekeeper uninit`** | Takes lanekeeper back out of the repository: worktrees, merged agent branches, `.lanekeeper/`, the gate workflow and the managed `.gitignore` block. Shows the plan and asks first; never deletes an unmerged branch. |
+| **`lanekeeper cleanup`** | Safely removes worktrees and releases port allocations. Deletes the agent's branch only when every commit on it is on the base branch (`git merge-base --is-ancestor`), and keeps it — saying whether its commits are pushed — when it is not. |
+| **`lanekeeper uninit`** | Takes lanekeeper back out of the repository: worktrees, agent branches merged into the base, `.lanekeeper/`, the gate workflow and the managed `.gitignore` block. Shows the plan and asks first; never deletes a branch that is not merged into the base, pushed or not. |
 
 Every command accepts a global **`--repo <path>`** (short form `-C`, as in git) to run
 against a repository that is not the current directory. It has to be the repository root;

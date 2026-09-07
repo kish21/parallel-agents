@@ -152,3 +152,88 @@ class TestProductPlaybookTickets(unittest.TestCase):
 def _issue(ref, title, body):
     from lanekeeper.trackers.base import TrackedIssue
     return TrackedIssue(ref=str(ref), title=title, body=body)
+
+
+class TestHtmlCommentsInTheForm(unittest.TestCase):
+    """The guidance a form carries in HTML comments is not something the filer wrote (#75).
+
+    product-playbook's issue template puts its instructions in `<!-- … -->` blocks under
+    each heading, and GitHub keeps them in the body while rendering nothing. A parser
+    that reads lines under a heading reads the guidance as the answer: a blank Lane
+    field came back as the whole comment, and a backticked example path inside the
+    Target Files guidance became a boundary the merge gate would then enforce.
+    """
+
+    FORM = (
+        "### Lane\n\n"
+        "<!-- Leave blank if unsure. Example: `checkout` -->\n\n"
+        "### 📁 Target Modules & Exact File Names\n\n"
+        "<!-- Name a file, never `src/services/`. Example: `src/services/quoteEngine.ts` -->\n"
+        "- [x] **Service:** `src/checkout/service.ts`\n"
+    )
+
+    def read(self, body, ref=75):
+        return boundary.read(_issue(ref, "t", body), DivideConfig())
+
+    def test_a_guidance_comment_under_a_blank_lane_is_not_a_lane_name(self):
+        self.assertEqual(self.read(self.FORM).declared_lane, "")
+
+    def test_a_lane_written_beside_the_guidance_is_still_read(self):
+        body = self.FORM.replace("`checkout` -->\n", "`checkout` -->\ncheckout\n")
+        self.assertEqual(self.read(body).declared_lane, "checkout")
+
+    def test_example_paths_inside_a_comment_are_not_a_boundary(self):
+        b = self.read(self.FORM)
+        self.assertEqual(b.paths, ("src/checkout/service.ts",))
+        # Not a boundary, and not a dropped line either: the filer never wrote it, so
+        # there is nothing to show them.
+        self.assertEqual(b.ignored_lines, ())
+        self.assertNotIn("quoteEngine", " ".join(b.ignored_lines))
+
+    def test_a_comment_spanning_several_lines_is_stripped_whole(self):
+        body = (
+            "### Allowed File Paths\n\n"
+            "<!--\n"
+            "  List every file this ticket touches, one per line.\n"
+            "  Example: `src/services/quoteEngine.ts`\n"
+            "  A directory such as src/legacy/ is too broad.\n"
+            "-->\n"
+            "src/checkout/service.ts\n"
+            "src/checkout/service.test.ts\n"
+        )
+        b = self.read(body)
+        self.assertEqual(b.paths, ("src/checkout/service.ts", "src/checkout/service.test.ts"))
+        self.assertEqual(b.ignored_lines, ())
+
+    def test_several_comments_on_one_line_leave_the_path_between_them(self):
+        body = ("### Allowed File Paths\n\n"
+                "<!-- a --> src/checkout/service.ts <!-- `src/b.ts` -->\n")
+        b = self.read(body)
+        self.assertEqual(b.paths, ("src/checkout/service.ts",))
+        self.assertEqual(b.ignored_lines, ())
+
+    def test_a_comment_that_opens_under_one_heading_and_closes_under_the_next(self):
+        """GitHub hides everything between the markers, headings included."""
+        body = (
+            "### Lane\n\n"
+            "<!-- the template used to have a field here\n"
+            "### Allowed File Paths\n"
+            "`src/old/example.ts`\n"
+            "-->\n"
+            "### Allowed File Paths\n\n"
+            "src/checkout/service.ts\n"
+        )
+        b = self.read(body)
+        self.assertEqual(b.declared_lane, "")
+        self.assertEqual(b.paths, ("src/checkout/service.ts",))
+
+    def test_an_unterminated_comment_hides_the_rest_of_the_body(self):
+        """A `<!--` nobody closed swallows everything after it, which is how GitHub
+        renders it — the filer saw no field there, so nothing there was stated."""
+        body = ("### Allowed File Paths\n\n"
+                "src/checkout/service.ts\n"
+                "<!-- oops\n"
+                "src/services/quoteEngine.ts\n")
+        b = self.read(body)
+        self.assertEqual(b.paths, ("src/checkout/service.ts",))
+        self.assertEqual(b.ignored_lines, ())

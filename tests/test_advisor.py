@@ -166,6 +166,92 @@ class TestTheAdvisorInTheDivision(unittest.TestCase):
         self.assertEqual([b.ref for b in proposal.unplaced], ["2"])
 
 
+
+class TestAnchoringNewWork(unittest.TestCase):
+    """#71: a ticket for new work names files that do not exist yet.
+
+    The model may name them. What reaches the draft is the nearest directory that does
+    exist, widened to a glob — still something real, never an invention. What it cannot
+    be anchored to anything is dropped, and the drop is said, not swallowed.
+    """
+
+    FILES = [
+        "src/components/settings/Panel.tsx",
+        "src/components/App.tsx",
+        "src/hooks/useAuth.ts",
+        "src/index.ts",
+        "README.md",
+    ]
+
+    def _advise(self, *paths):
+        payload = '{"paths": [' + ", ".join(f'"{p}"' for p in paths) + "]}"
+        return advisor_mod.ClaudeCodeAdvisor("claude", Path("."), runner=FakeRunner(payload))
+
+    def test_a_new_file_becomes_its_existing_directory(self):
+        adv = self._advise("src/components/settings/ThemeToggle.tsx", "src/hooks/useTheme.ts")
+        proposal = adv.propose("9", "Theme toggle", "body", self.FILES)
+        self.assertEqual(proposal.paths, ("src/components/settings/**", "src/hooks/**"))
+        self.assertEqual(proposal.widened, (
+            ("src/components/settings/ThemeToggle.tsx", "src/components/settings/**"),
+            ("src/hooks/useTheme.ts", "src/hooks/**"),
+        ))
+        self.assertEqual(proposal.dropped, ())
+        self.assertIs(adv.last_proposal, proposal)
+        self.assertEqual(adv.propose_paths("9", "Theme toggle", "body", self.FILES),
+                         proposal.paths, "the old entry point returns the same list")
+
+    def test_a_missing_parent_walks_up_to_the_grandparent(self):
+        proposal = advisor_mod.anchor_paths(
+            ("src/components/theme/ThemeToggle.tsx",), self.FILES)
+        self.assertEqual(proposal.paths, ("src/components/**",))
+        self.assertEqual(proposal.widened,
+                         (("src/components/theme/ThemeToggle.tsx", "src/components/**"),))
+
+    def test_nothing_widens_to_a_top_level_container(self):
+        # `src` exists, but `src/**` is the project, not a boundary.
+        proposal = advisor_mod.anchor_paths(
+            ("src/theme/ThemeToggle.tsx", "lib/new/thing.ts", "NewFile.ts"), self.FILES)
+        self.assertEqual(proposal.paths, ())
+        self.assertEqual(proposal.widened, ())
+        self.assertEqual([orig for orig, _ in proposal.dropped],
+                         ["src/theme/ThemeToggle.tsx", "lib/new/thing.ts", "NewFile.ts"])
+        for _, reason in proposal.dropped:
+            self.assertTrue(reason, "a drop carries its reason")
+        self.assertIn("src", dict(proposal.dropped)["src/theme/ThemeToggle.tsx"])
+
+    def test_every_path_written_matches_something_real(self):
+        suggested = ("src/components/settings/ThemeToggle.tsx", "src/hooks/useTheme.ts",
+                     "src/components/theme/Toggle.tsx", "src/theme/x.ts", "made/up/**",
+                     "src/hooks/useAuth.ts", "src/components/**")
+        proposal = advisor_mod.anchor_paths(suggested, self.FILES)
+        self.assertTrue(proposal.paths)
+        self.assertEqual(advisor_mod.keep_real_paths(proposal.paths, self.FILES),
+                         proposal.paths, "keep_real_paths' guarantee survives the widening")
+        for path in proposal.paths:
+            self.assertTrue(any(advisor_mod.LaneEngine.match_glob(f, path) for f in self.FILES),
+                            path)
+
+    def test_an_existing_file_is_kept_verbatim(self):
+        proposal = advisor_mod.anchor_paths(
+            ("src/hooks/useAuth.ts", "src/components/settings/**"), self.FILES)
+        self.assertEqual(proposal.paths, ("src/hooks/useAuth.ts", "src/components/settings/**"))
+        self.assertEqual(proposal.widened, ())
+        self.assertEqual(proposal.dropped, ())
+
+    def test_duplicate_widening_is_written_once(self):
+        proposal = advisor_mod.anchor_paths(
+            ("src/hooks/useTheme.ts", "src/hooks/useColour.ts", "src/hooks/**"), self.FILES)
+        self.assertEqual(proposal.paths, ("src/hooks/**",))
+        self.assertEqual(proposal.widened, (
+            ("src/hooks/useTheme.ts", "src/hooks/**"),
+            ("src/hooks/useColour.ts", "src/hooks/**"),
+        ), "both are recorded even though one glob is written")
+
+    def test_the_prompt_allows_files_that_do_not_exist_yet(self):
+        prompt = advisor_mod.build_prompt("9", "Theme toggle", "body", self.FILES)
+        self.assertIn("do not exist yet", prompt)
+        self.assertIn(f"At most {advisor_mod.MAX_PATHS}", prompt)
+
 class TestConfiguration(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

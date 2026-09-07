@@ -196,7 +196,23 @@ lanekeeper spawn --ticket 2
 - **Ports 8001 and 3001 were reserved** for this agent, and written into a `.env` in
   its worktree, so two agents running dev servers do not fight over port 3000.
 - **`.lanekeeper/config.yaml` was written** — that is the policy, and it now contains
-  lane `feat-02` with those six paths.
+  lane `feat-02` with those six paths. It is short: only the lanes and whatever differs
+  from the defaults, so the file is dominated by what you care about and picks up
+  improved defaults when you upgrade. The lane also records where it came from:
+
+  ```yaml
+  - name: feat-02
+    allow:
+    - src/domain/contracts.ts
+    …
+    ticket: '2'
+    paths_from: ticket        # ticket | flag (--allow) | proposed (--propose, accepted)
+  ```
+
+  When a ticket is finished, add `retired: true` under its lane. That is bookkeeping,
+  not enforcement: the collision report and CODEOWNERS skip a retired lane, `spawn`
+  refuses it without `--force`, and the gate checks it exactly as before. `cleanup`
+  suggests it at the natural moment; the edit is always yours.
 
 ### Step 3 — Commit the policy
 
@@ -204,7 +220,19 @@ lanekeeper spawn --ticket 2
 git add .lanekeeper .gitignore && git commit -m "Add the lane policy"
 ```
 
-Do this **now**, before anything else. Two reasons, both learned the hard way:
+Do this **now**, before anything else, **in this checkout** (not inside the agent's
+worktree), on whatever branch you are on. `spawn` says exactly that:
+
+```
+  • Commit the policy before you commit anything else — in this checkout, not inside
+    the agent's worktree, and ideally on a branch of its own, opened as a pull request
+    labelled 'lane: policy'. …
+```
+
+On a branch other than the default it names that branch instead. It never tells you to
+commit to a branch the policy itself lists as protected. Land the commit as a pull
+request labelled `lane: policy`, like any other change. Two reasons, both learned the
+hard way:
 
 1. CI can only enforce a policy that is in the repository.
 2. Left uncommitted, your next `git add -A` sweeps it into whatever branch you happen
@@ -213,12 +241,37 @@ Do this **now**, before anything else. Two reasons, both learned the hard way:
 
 ### Step 4 — Do the work in the agent's worktree
 
-Lanekeeper prepared the desk. It does not write code. Open the worktree and start your
-coding agent there:
+Lanekeeper prepared the desk. It does not write code, and it does not install
+anything. `spawn` ends with the numbered steps, read from your project:
+
+```
+▶ Now do the work. Lanekeeper has prepared the desk; it does not write code.
+
+  1. Once per worktree, install the dependencies — a worktree is a fresh
+     checkout, so it has none (package-lock.json says how):
+
+            cd .lanekeeper/worktrees/agent-001 && npm ci
+
+  2. Open .lanekeeper/worktrees/agent-001 in your editor ('lanekeeper open agent-001' does it),
+     then start your coding agent there: claude, cursor, whatever you use.
+```
+
+**A worktree has no `node_modules`.** It is a checkout of tracked files, so tests and
+dev servers fail there until you run the install once. Lanekeeper names the command
+from your lockfile (`package-lock.json` → `npm ci`, `pnpm-lock.yaml`, `yarn.lock`,
+`uv.lock`, `poetry.lock`); a project with a manifest but no lockfile is told the install
+is its own call; a project with neither gets no line. It is never run for you.
 
 ```bash
 lanekeeper open agent-001        # opens the worktree in your editor (VS Code by default)
 ```
+
+`open` repeats the install line, and one more: *if `lanekeeper` is not found in that
+window, `python -m lanekeeper.cli` is the same program.* The window your editor opens
+carries the editor's `PATH`, not your terminal's, and on a Microsoft Store Python the
+shim is not on it. Every "run this next" line lanekeeper prints uses the form you
+started it with; set `LANEKEEPER_INVOCATION=lanekeeper` if you use the PowerShell
+wrapper function from §4 and want the short form printed back.
 
 Then give the agent its task **and its boundary**. `spawn` printed a prompt that
 carries both — copy it verbatim:
@@ -246,6 +299,7 @@ lanekeeper check --lane feat-02 --base main --working-tree
 
 ```
 🛡️  LANE CHECK — lane 'feat-02', main...HEAD
+  in …/repo/.lanekeeper/worktrees/agent-001 — agent-001's worktree, lane 'feat-02'
 
   ✓ All 2 changed files stay inside the lane.
 
@@ -254,6 +308,20 @@ lanekeeper check --lane feat-02 --base main --working-tree
 
 `--working-tree` includes changes that are not committed yet. Leave it off to check
 only what is committed, which is what CI does.
+
+**The second line says where it ran.** With two identical-looking editor windows open,
+running the check in the wrong one is easy, and the verdict is then correct about the
+wrong question. In the main checkout it says so and names the worktrees that exist; in
+a worktree asked about a different lane than its own it warns above the verdict:
+
+```
+  ⚠️  This worktree's .lane says 'feat-02', but the check was asked about 'feat-03'.
+      If this is agent-001's work, you probably meant --lane feat-02.
+```
+
+Inside a worktree, `check` reads the policy from the main checkout whenever the two
+differ, and says so — that is the copy being maintained and the one CI reads once it is
+committed.
 
 **On the very first agent you will also see this line, and it is expected:**
 
@@ -296,9 +364,22 @@ gh pr create --fill --label "lane: feat-02"
 
 In the web UI, type the label name in the Labels box and GitHub offers to create it.
 
-That label is the only way the gate in CI knows which boundary to check. With no
-`lane:` label, or more than one, **it fails closed** — it will not guess, and that is
-deliberate: a change with no declared boundary has no boundary.
+The label is the declaration a reviewer can see and change without a checkout, and it
+wins. **A branch lanekeeper made already carries its lane in its name**, so the gate
+(with `--lane-from-branch`, which `install-gate` turns on) reads the lane from the
+branch when no label is present. A label that disagrees with the branch fails,
+naming both: that is the mislabelled pull request, the one case the tool can catch.
+With no label and a hand-made branch, **it fails closed** — it will not guess, and that
+is deliberate: a change with no declared boundary has no boundary.
+
+On the pull-request page the verdict is on the run's summary, not only in the log, and
+each blocked file is annotated on the Files tab:
+
+```
+### Lane check — `feat-02`
+
+✅ **Passed.** All 2 changed files stay inside lane `feat-02`.
+```
 
 ---
 
@@ -371,11 +452,44 @@ because the right response is different every time.
 ❌ CHECK FAILED: this change leaves its lane.
 ```
 
+```
+  ✗ tests/unit/contracts.test.ts: outside lane 'feat-02'.
+      If this file belongs in this lane: lanekeeper allow --lane feat-02 tests/unit/contracts.test.ts
+```
+
 The agent edited a file its ticket never mentioned. Decide which is true:
 
 - *The agent overreached* → revert that file. This is the case the tool exists for.
-- *The ticket was incomplete* → add the path to the lane in `.lanekeeper/config.yaml`,
-  on your main checkout, as a deliberate decision — then commit that as its own change.
+- *The ticket was incomplete* → the one decision is *yes, that file belongs to this
+  lane*, and the message offers the command that records it:
+
+  ```bash
+  lanekeeper allow --lane feat-02 tests/unit/contracts.test.ts
+  ```
+
+  ```
+  ✅ tests/unit/contracts.test.ts is now allowed in lane 'feat-02'.
+     .lanekeeper/config.yaml changed; commit it (it is the policy, so on its own, labelled 'lane: policy') for the gate in CI to read it.
+  ```
+
+  Inside an agent's worktree the `--lane` defaults to that worktree's own, and the
+  policy in your main checkout is what changes. It refuses a path another lane already
+  claims (naming it), the policy files, and shared zones — those exist so a person
+  decides deliberately. It never widens a lane on its own.
+
+**A tracked build artifact** — `tsconfig.tsbuildinfo`, coverage output, a lockfile an
+unrelated install rewrote — trips every lane on every check until somebody untracks it.
+The honest fix is to untrack it. Until then, name it once in the policy, and the gate
+leaves it out in every lane and says so:
+
+```yaml
+generated:
+  - '*.tsbuildinfo'
+```
+
+The list lives in `config.yaml`, which no lane may edit, so an agent cannot exempt a
+file from inside its own pull request. The default is empty: nothing is ignored unless
+you say so.
 
 **2. Denied by the lane itself** — the lane lists a `deny` pattern that matches:
 
@@ -516,35 +630,38 @@ lanekeeper spawn --ticket 3
 ```
 
 ```
-🎫 Ticket #3: [FEAT-03]: Status Lifecycle Transitions & Multi-Format Export Profiles (M3)
-   Lane 'feat-03', bounded by the ticket's own file list:
-     src/domain/contracts.ts
-     …
+⚠️  Another lane could touch the same files. Both lanes allow them, so both
+    agents' changes pass their own checks — and meet at merge. That is the
+    collision this tool exists to prevent, and the gate will not catch it:
+      'feat-02' claims src/domain/contracts.ts, this ticket claims src/domain/contracts.ts
 
-   ⚠️  Another lane could touch the same files. Two agents on one file is the collision
-   this tool exists to prevent, so settle it first:
-     'feat-02' claims src/domain/contracts.ts, this ticket claims src/domain/contracts.ts
+    The designed answer is a shared zone: 'shared: true' on a lane nobody is
+    spawned into, checked before either lane's own list, so a change there is
+    escalated rather than passed twice. In .lanekeeper/config.yaml:
+      - name: shared
+        shared: true
+        allow:
+        - src/domain/contracts.ts
+
+    Nothing has been written yet.
+   Proceed anyway [p], write the shared zone and proceed [s], or stop [n]? [p/s/N]:
 ```
 
-**Read that warning.** Both tickets legitimately need `src/domain/contracts.ts`, and
-the gate will pass both agents editing it, because it *is* inside both boundaries.
-Lanekeeper reports the overlap; it does not decide for you. Your options:
+**Read that.** It is printed *before* the lane goes into the policy and before a
+worktree exists. Both tickets legitimately need `src/domain/contracts.ts`, and the gate
+will pass both agents editing it, because it *is* inside both boundaries — the warning
+says so, because everything printed after it is green. Lanekeeper asks; it does not
+decide for you:
 
-- **Sequence them** — let one land, then start the other.
-- **Give the file to one lane** and remove it from the other in `config.yaml`.
-- **Make it shared** — declare a lane with `shared: true` holding that file:
+- **`s`** writes the shared zone shown and proceeds. From then on a change to that file
+  from *either* lane is escalated, not passed. Choose this when the file genuinely
+  belongs to everyone and will keep coming up.
+- **`p`** proceeds with the overlap as it is — sequence the two agents yourself, or give
+  the file to one lane and take it out of the other in `config.yaml`.
+- **`n`** stops. Nothing was written; edit the tickets and run again.
 
-  ```yaml
-  lanes:
-    - name: contracts
-      shared: true          # owned by nobody, on purpose
-      allow:
-        - src/domain/contracts.ts
-  ```
-
-  Nobody is spawned into it (`spawn` refuses that lane by name), and any agent whose
-  change reaches that file is told to **raise** it rather than make it. This is the
-  option to choose when the file genuinely belongs to everyone and will keep coming up.
+Without a terminal — a script, CI — it proceeds with the warning printed, and says
+`--accept-overlap` is how to say the overlap is deliberate.
 
 **One lane, one agent.** If you try to put a second agent in a lane that already has a
 live one, lanekeeper refuses and names the occupant:
@@ -624,15 +741,20 @@ lanekeeper cleanup agent-002
 ```
 🧹 Successfully cleaned up agent 'worker-2' (agent-002).
    Released ports: 8002, 3002
-   Deleted branch parallel/agent-002/3-feat-03-… (fully merged).
+   Kept branch parallel/agent-002/3-feat-03-…: not merged into main. Its commits are pushed to origin/parallel/agent-002/3-feat-03-….
+   If #3 is finished, you can mark lane 'feat-03' retired — 'retired: true' under it in .lanekeeper/config.yaml. A suggestion, and the edit is yours: the collision report and CODEOWNERS then skip it; the gate does not change.
 ```
 
-The worktree goes, the ports go back in the pool, and the branch is deleted **only if
-git agrees everything on it is merged**. If it is not:
+The worktree goes, the ports go back in the pool, and the branch is deleted **only
+when every commit on it is already on the base branch** — asked of git directly, never
+inferred from `git branch -d`, which says yes to a pushed branch whatever `main` holds.
+A merged branch reads `Deleted branch … (merged into main)`. An unmerged one is kept,
+and the message says where its commits are, because the two cases carry different
+risk:
 
 ```
-   Kept branch parallel/agent-003/2-feat-02-…: it has commits nobody has merged.
-   Delete it yourself with 'git branch -D' when you are sure.
+   Kept branch parallel/agent-003/2-feat-02-…: not merged into main, and not pushed
+   anywhere. Delete it yourself with 'git branch -D' when you are sure.
 ```
 
 Lanekeeper never deletes unmerged work. The lane stays in `config.yaml` — it is your
@@ -673,8 +795,9 @@ Remove all of that? [y/N]: y
    Committed files were removed, so commit the deletion when you are ready.
 ```
 
-An unmerged agent branch is **kept even with `--force`**. `--force` answers "are you
-sure"; it does not decide that your commits do not matter.
+An agent branch not merged into the base branch is **kept even with `--force`**,
+pushed or not, and the plan says so per branch. `--force` answers "are you sure"; it
+does not decide that your commits do not matter.
 
 ---
 
@@ -694,6 +817,13 @@ sure"; it does not decide that your commits do not matter.
 | `The editor command 'code' is not on PATH` | `lanekeeper open` could not find your editor. Nothing is broken; the worktree exists. | Set `editor.command` in `.lanekeeper/config.yaml` to your editor's command (`cursor`, `subl`, `idea`), or open the printed path yourself. |
 | The worktree folder appears in my editor's sidebar | Expected. It is the agents' checkouts, ignored by git. | Leave it, or set `worktree_dir: ../lk-worktrees` in `config.yaml` to keep it outside the project. |
 | `lanekeeper doctor` reports a problem | Something is stale — a leftover port, an orphaned worktree. | `lanekeeper repair` when doctor says it is repairable; doctor tells you when it is not and why. |
+| `Branch '…' already exists on origin at …` | `spawn` looked at the remote first: an earlier session pushed that branch, often as an open pull request's head. Nothing was created. | `--remote-branch continue` to carry on from it, `rename` to start fresh under the name it proposes, `ignore` to use the name knowingly. Your call; it picks none. |
+| `Could not ask origin whether '…' already exists there` | The remote could not be reached. A note, not an error. | Nothing; the spawn went ahead. Check the branch name against the remote yourself before pushing. |
+| `This worktree's .lane says 'x', but the check was asked about 'y'` | You ran `check --lane y` inside agent x's worktree. The verdict is right about the question asked. | Re-run with the lane the worktree names, or from the checkout you meant. |
+| `The label says lane 'x' but the branch name says 'y'` | A mislabelled pull request — the one case the gate can catch. | Fix the label (it wins) or the branch; the check does not run against either until they agree. |
+| `tsconfig.tsbuildinfo: outside lane …` (or any build artifact) | A tracked file a build rewrites trips every lane. | Untrack it, or list it under `generated:` in `config.yaml`. See §7. |
+| `Lane 'x' is marked retired` | Somebody put `retired: true` on that lane. | Remove the line to reopen the lane, or `--force` to spawn into it as it is. |
+| `'spwan' is not a lanekeeper command. The most similar command is 'spawn'.` | A typo. | Type the one it names. |
 
 Sanity check at any time:
 
@@ -724,6 +854,9 @@ Things this tool does not do, and things not yet proven, so you are not surprise
 - **A lane is only as good as the ticket.** A ticket that names the wrong files gives
   an agent the wrong boundary, correctly enforced.
 - **Reading is unrestricted.** Only changes are checked.
+- **The remote check is `git ls-remote`**, nothing more: it sees a branch that exists
+  on `origin`, and names its pull request only when `gh` can answer. It never sees a
+  branch somebody has not pushed.
 - **`lanekeeper board`** (the GitHub project board integration) has never been run
   against a live project board.
 - **`lanekeeper codeowners`** has never been observed routing a real pull request with

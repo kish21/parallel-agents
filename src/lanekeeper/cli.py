@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import shutil
@@ -46,6 +47,8 @@ from .trackers import UnknownTrackerError, get_tracker
 from .trackers.base import TrackerError
 from . import ticket as ticket_mod
 from . import uninit as uninit_mod
+from . import deps as deps_mod
+from .invocation import fallback_line, invocation
 from .divide import boundary as divide_boundary
 from .divide import codebase as divide_codebase
 from .layout import detect_layout, measure_coverage, tracked_files
@@ -539,8 +542,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
 
     print(f"\n📋 LANEKEEPER — {config.project_name.upper()}\n")
+    retired = sorted(n for n, l in config.lanes.items() if l.retired)
+    if config.lanes:
+        print(f"  Lanes: {len(config.lanes)}"
+              + (f" ({len(retired)} retired: {', '.join(retired)})" if retired else ""))
+        print()
     if not agents:
-        print("  No active agents found. Run 'lanekeeper spawn' to start one.\n")
+        print(f"  No active agents found. Run '{invocation()} spawn' to start one.\n")
         return 0
 
     header = f"{'Agent ID':<12} {'Name':<14} {'Seat':<6} {'Lane':<12} {'Status':<10} {'Ports':<16} {'Task'}"
@@ -668,6 +676,16 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     # A shared zone has no owner on purpose (#25). Spawning an agent into it would give
     # that zone exactly the single owner it is declared not to have, and every other
     # lane would then be told to escalate changes to a file an agent was busy editing.
+    if config.get_lane(args.lane).retired and not args.force:
+        # Retired is bookkeeping, not enforcement (#70): the gate still checks the
+        # lane exactly as before. But somebody spawning into it is either working a
+        # finished ticket or reusing a name, and both deserve a sentence first.
+        print(f"❌ Lane '{args.lane}' is marked retired in {paths.display_config_path()}: "
+              f"its work is finished.", file=sys.stderr)
+        print("   Remove 'retired: true' from the lane to reopen it, or --force to spawn "
+              "into it as it is.", file=sys.stderr)
+        return 1
+
     if config.get_lane(args.lane).shared:
         print(f"❌ Lane '{args.lane}' is shared code: it belongs to no agent on purpose.",
               file=sys.stderr)
@@ -778,6 +796,27 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     first_worktree = not any(
         a.id != agent_id for a in state_mgr.list_agents())
 
+    # Phase 1b: what does the remote know about this branch name (#78)? This is the
+    # last cheap moment — everything after it is work the person may lose at `git
+    # push`, where git's own hint (`git pull`) would merge an open pull request's
+    # history into two lines of new work. A remote that cannot be reached is a
+    # printed note and the spawn proceeds; a branch that exists is refused with the
+    # three ways forward, and nothing is picked on the person's behalf.
+    try:
+        outcome = _reconcile_remote_branch(worktree_mgr, branch_name, args, config, root)
+    except Exception as e:
+        outcome = ("stop", f"could not look at the remote: {e}")
+    if outcome[0] == "stop":
+        port_mgr.release_ports(agent_id)
+        state_mgr.remove_agent(agent_id)
+        print(f"❌ {outcome[1]}", file=sys.stderr)
+        return 1
+    if outcome[0] == "renamed":
+        branch_name = outcome[1]
+        agent.branch = branch_name
+        state_mgr.save_agent(agent)
+    fetch_from = outcome[1] if outcome[0] == "continue" else None
+
     # Phase 2: create the worktree under the dedicated git lock, then do the rest
     # unlocked. Concurrent `git worktree add` against one repository races on refs and the
     # index, so it must be serialised — but only against other git operations, not against
@@ -794,6 +833,8 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             )
         print(f"🔨 Creating Git worktree for {agent_id} on branch '{branch_name}'...")
         with state_mgr.git_lock():
+            if fetch_from:
+                worktree_mgr.fetch_branch(branch_name, fetch_from)
             resolved_path = worktree_mgr.create_worktree(target_path_for(root, config, agent_id), branch_name)
         agent.worktree_path = str(resolved_path)
         env_mgr.write_agent_environment(resolved_path, agent)
@@ -809,34 +850,121 @@ def cmd_spawn(args: argparse.Namespace) -> int:
     state_mgr.save_agent(agent)
 
     ports_display = ", ".join(f"{k}: {v}" for k, v in allocated_ports.items())
+    inv = invocation()
     print(f"\n🚀 Agent '{name}' ({agent_id}) successfully spawned!")
     print(f"  • Worktree: {resolved_path}")
     print(f"  • Branch:   {branch_name}")
     print(f"  • Lane:     {lane}")
     print(f"  • Ports:    {ports_display}")
     print(f"  • Seat:     {seat}")
-    print(f"\nTo inspect:  lanekeeper inspect {agent_id}")
-    print(f"To validate: lanekeeper validate {agent_id}")
+    print(f"\nTo inspect:  {inv} inspect {agent_id}")
+    print(f"To validate: {inv} validate {agent_id}")
     if ticket_lane is not None:
         print()
-        print(ticket_mod.next_steps(ticket_lane, (root / check_mod.WORKFLOW_PATH).exists(),
-                                    base=worktree_mgr.get_default_branch()))
+        print(ticket_mod.next_steps(
+            ticket_lane, (root / check_mod.WORKFLOW_PATH).exists(),
+            base=worktree_mgr.get_default_branch(),
+            # The branch the person is actually on, so the advice about committing the
+            # policy names it — and never names a protected one (#69).
+            branch=worktree_mgr.current_branch(),
+            protected=config.git.protected_branches, root=root))
     if first_worktree:
         # A whole second copy of the project appearing in the sidebar reads as a fault
         # to somebody who has never used git worktrees. Say what it is, once.
         print(f"\n  ℹ️  {config.worktree_dir}/ now holds a separate checkout per agent. Git "
-              f"ignores it, and\n      'lanekeeper cleanup {agent_id}' removes it. To keep "
+              f"ignores it, and\n      '{inv} cleanup {agent_id}' removes it. To keep "
               f"it outside the project, set\n      'worktree_dir: ../lk-worktrees' in "
               f"{paths.display_config_path()}.")
+    # The editor is opened *before* the instructions are printed, so the instructions
+    # can say truthfully whether a window is there (#67). A missing editor is reported
+    # and the spawn still succeeded: the agent exists whether or not the window does.
+    editor_opened = False
+    open_code = 0
+    if getattr(args, "open", False):
+        open_code = _open_desk(config, resolved_path, agent_id)
+        editor_opened = open_code == 0
     if ticket_lane is not None:
         print()
-        print(ticket_mod.how_to_work(ticket_lane, resolved_path, agent_id, root=root))
+        print(ticket_mod.how_to_work(ticket_lane, resolved_path, agent_id, root=root,
+                                     editor_opened=editor_opened,
+                                     dependencies=deps_mod.detect(root)))
     if getattr(args, "open", False):
-        # The agent exists whether or not the editor opens; a missing editor is reported
-        # and the spawn still succeeded.
-        return _open_desk(config, resolved_path, agent_id)
-    print(f"\nTo open:     lanekeeper open {agent_id}")
+        return open_code
+    print(f"\nTo open:     {inv} open {agent_id}")
     return 0
+
+
+def _reconcile_remote_branch(worktree_mgr: WorktreeManager, branch_name: str,
+                             args: argparse.Namespace, config: Config, root: Path):
+    """("ok" | "renamed" | "stop", detail). See the call site and issue #78.
+
+    `--remote-branch continue` fetches the remote branch so the worktree resumes it;
+    `rename` takes the next free name lanekeeper proposes; `ignore` proceeds under the
+    same name, deliberately, and says what that means. Without the flag, an existing
+    remote branch stops the spawn — never silently resolved in either direction:
+    branching from the remote head would smuggle unreviewed work into a new lane, and
+    renaming would leave two branches for one ticket with no explanation.
+    """
+    if worktree_mgr.branch_exists(branch_name):
+        # A local branch of that name is checked out as it is — the existing behaviour
+        # for a re-spawn — and the remote question does not arise.
+        return ("ok", "")
+    lookup = worktree_mgr.remote_branches(f"{branch_name}*")
+    if not lookup.available:
+        if lookup.error:
+            print(f"ℹ️  Could not ask {lookup.remote} whether '{branch_name}' already exists "
+                  f"there ({lookup.error}); carrying on without knowing.")
+        return ("ok", "")
+    sha = lookup.sha(branch_name)
+    if sha is None:
+        return ("ok", "")
+    choice = (getattr(args, "remote_branch", None) or "").strip().lower()
+    if choice == "continue":
+        print(f"↩️  Continuing the work on {lookup.remote}/{branch_name} ({sha[:10]}): the "
+              f"worktree starts from it.")
+        # The fetch writes refs, so it happens under the git lock with the worktree
+        # creation, not here: this function runs unlocked because it talks to the
+        # network, and a ref write racing another spawn's `worktree add` is the
+        # "cannot lock ref" failure the lock exists to prevent.
+        return ("continue", lookup.remote)
+    if choice == "rename":
+        fresh = _free_branch_name(branch_name, lookup.branches, worktree_mgr)
+        print(f"🔀 Branch '{branch_name}' already exists on {lookup.remote}; this agent "
+              f"works on '{fresh}' instead.")
+        return ("renamed", fresh)
+    if choice == "ignore":
+        print(f"⚠️  Proceeding on '{branch_name}' although {lookup.remote} already has a "
+              f"branch of that name at {sha[:10]} (--remote-branch ignore). The first "
+              f"push will be rejected as non-fast-forward; do not 'git pull' the old "
+              f"history into this work by reflex.")
+        return ("ok", "")
+    pr = None
+    try:
+        pr = get_tracker(config.intake, root).pull_request_for_branch(branch_name)
+    except Exception:
+        pr = None
+    lines = [
+        f"Branch '{branch_name}' already exists on {lookup.remote} at {sha[:10]}"
+        + (f", and it is the head of {pr}" if pr else "") + ".",
+        f"   Starting new work under that name would collide at 'git push', after the "
+        f"work is done. Three ways forward — your call, not mine:",
+        f"     --remote-branch continue   fetch it and carry on from where it stopped",
+        f"     --remote-branch rename     start fresh as "
+        f"'{_free_branch_name(branch_name, lookup.branches, worktree_mgr)}'",
+        f"     --remote-branch ignore     use the same name anyway, knowingly",
+        f"   Nothing was created.",
+    ]
+    return ("stop", "\n".join(lines))
+
+
+def _free_branch_name(branch_name: str, remote: dict, worktree_mgr: WorktreeManager) -> str:
+    """`<name>-2`, `-3`, …: the first name neither the remote nor this clone holds."""
+    n = 2
+    while True:
+        candidate = f"{branch_name}-{n}"
+        if candidate not in remote and not worktree_mgr.branch_exists(candidate):
+            return candidate
+        n += 1
 
 
 def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
@@ -878,6 +1006,31 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
         print(f"❌ {e}", file=sys.stderr)
         return None
 
+    # The overlap is reported before anything is written (#80). It used to be printed
+    # after the lane was in the policy and just before the worktree was made, so
+    # "settle it first" arrived after it had been settled the other way. Nothing here
+    # blocks: on a terminal the person is asked, and off one the spawn proceeds with
+    # the warning, because scripts and CI have nobody to answer.
+    if lane.collisions:
+        print(ticket_mod.collision_report(lane, root))
+        accepted = getattr(args, "accept_overlap", False)
+        interactive = _interactive() and not accepted
+        if interactive:
+            choice = _ask_about_overlap()
+            if choice == "n":
+                print("   Stopped. Nothing was written; edit the tickets or add the shared "
+                      "zone, then run again.")
+                return None
+            if choice == "s":
+                zone = ticket_mod.mark_shared(config, root, ticket_mod.shared_zone_paths(lane))
+                print(f"   Wrote the contested paths into the shared zone '{zone}' in "
+                      f"{paths.display_config_path()}. A change there is now escalated "
+                      f"from either lane.")
+                lane.collisions = ticket_mod.collisions(config, lane.name, lane.paths)
+        if lane.collisions:
+            print(ticket_mod.collision_proceeding(lane, accepted, interactive))
+        print()
+
     # A brand-new project gets the rest of a first-time setup, as `divide --confirm` does.
     if not paths.config_path(root).exists():
         save_config(config, root)
@@ -889,6 +1042,31 @@ def _lane_from_ticket(config: Config, root: Path, args: argparse.Namespace):
     print(ticket_mod.describe(lane, created, widened))
     print()
     return lane
+
+
+def _interactive() -> bool:
+    """Whether there is a person at a terminal to answer a question."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ask_about_overlap() -> str:
+    """Proceed, share, or stop. A question, not an inference: the person knows the
+    product and lanekeeper does not."""
+    prompt = ("   Proceed anyway [p], write the shared zone and proceed [s], or stop [n]? "
+              "[p/s/N]: ")
+    try:
+        answer = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return "n"
+    if answer in ("p", "proceed", "y", "yes"):
+        return "p"
+    if answer in ("s", "share", "shared"):
+        return "s"
+    return "n"
 
 
 def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespace):
@@ -903,17 +1081,31 @@ def _propose_boundary(config: Config, root: Path, issue, args: argparse.Namespac
     advisor = ClaudeCodeAdvisor(config.divide.advisor_command, root)
     try:
         advisor.check_available()
-        found = advisor.propose_paths(issue.ref, issue.title, issue.body, tracked_files(root))
+        proposal = advisor.propose(issue.ref, issue.title, issue.body, tracked_files(root))
     except AdvisorError as e:
         print(f"❌ {e}", file=sys.stderr)
         return None
+    found = proposal.paths
+    for original, why in proposal.dropped:
+        # Said, not swallowed: a suggestion the tree could not anchor is still a
+        # suggestion the person may want to act on by hand.
+        print(f"   (not used: {original} — {why})")
     if not found:
         print(f"❌ Claude Code could not name any files in this project for ticket "
               f"#{issue.ref}. Say them yourself with --allow.", file=sys.stderr)
         return None
+    by_glob = {}
+    for original, glob in proposal.widened:
+        by_glob.setdefault(glob, []).append(original)
     print(f"🤖 Claude Code proposes this boundary for #{issue.ref} ({issue.title}):")
     for p in found:
-        print(f"     {p}")
+        if p in by_glob:
+            # A directory glob is a wider grant than the file it stood in for, and
+            # the person accepting it should see that (#71).
+            print(f"     {p}    (widened from {', '.join(by_glob[p])}, which does not "
+                  f"exist yet)")
+        else:
+            print(f"     {p}")
     allow_line = " ".join(f"--allow '{p}'" for p in found)
     if getattr(args, "yes", False):
         return tuple(found)
@@ -942,6 +1134,31 @@ def _open_desk(config: Config, worktree: Path, agent_id: str) -> int:
     return 0
 
 
+def _desk_notes(root: Path, worktree: Path) -> List[str]:
+    """What the person needs to know on arriving in the window `open` made.
+
+    Two things the window does not say for itself: the checkout has no dependencies
+    installed (#73), and the `lanekeeper` shim may not resolve there (#76). Both are
+    said only where the tool hands somebody to another window, so they stay noticed.
+    """
+    notes: List[str] = []
+    step = deps_mod.detect(root)
+    where = ticket_mod._short(worktree, root)
+    if step is not None:
+        if step.command:
+            notes.append(f"Once per worktree, install the dependencies — it is a fresh "
+                         f"checkout ({step.evidence} says how):")
+            notes.append(f"   cd {where} && {step.command}")
+        else:
+            notes.append(f"A fresh worktree has no dependencies installed; this project "
+                         f"has a {step.evidence} but no lockfile, so the install is your "
+                         f"call.")
+    fallback = fallback_line()
+    if fallback:
+        notes.append(fallback)
+    return notes
+
+
 def cmd_open(args: argparse.Namespace) -> int:
     """Opens an agent's worktree in the configured editor."""
     root = Path.cwd()
@@ -957,9 +1174,14 @@ def cmd_open(args: argparse.Namespace) -> int:
         return 1
     worktree = Path(agent.worktree_path)
     if not worktree.exists():
-        print(f"❌ Worktree {worktree} does not exist. Run 'lanekeeper doctor'.", file=sys.stderr)
+        print(f"❌ Worktree {worktree} does not exist. Run '{invocation()} doctor'.",
+              file=sys.stderr)
         return 1
-    return _open_desk(config, worktree, agent.id)
+    code = _open_desk(config, worktree, agent.id)
+    if code == 0:
+        for note in _desk_notes(root, worktree):
+            print(f"   {note}")
+    return code
 
 
 def cmd_install_gate(args: argparse.Namespace) -> int:
@@ -993,43 +1215,30 @@ def cmd_check(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        config = load_config(root)
+        config = _policy_for_check(root, args)
     except FileNotFoundError:
-        # An agent worktree branched before the policy was committed carries no policy
-        # of its own, which is the ordinary case the first time somebody spawns an
-        # agent. The policy it was spawned under is in the repository's main checkout,
-        # so read it from there and say so: it is the same boundary, but it is not the
-        # one CI will see until the policy is committed.
-        borrowed = WorktreeManager.main_worktree_root()
-        config = None
-        if borrowed is not None and borrowed != root:
-            try:
-                config = load_config(borrowed)
-            except (FileNotFoundError, ValueError):
-                config = None
-        if config is None:
-            print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
-                  f"policy to check against.", file=sys.stderr)
-            print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
-                  f"branch is made from it. Merge it there, bring it into this branch, and "
-                  f"run the check again.", file=sys.stderr)
-            return 1
-        print(f"ℹ️  This checkout has no policy of its own; reading the one in {borrowed}.")
-        print(f"   Commit the policy on '{args.base.split('/')[-1]}' so the gate in CI "
-              f"reads it too.")
+        print(f"❌ This checkout has no {paths.display_config_path()}, so there is no "
+              f"policy to check against.", file=sys.stderr)
+        print(f"   The policy has to be committed on '{args.base.split('/')[-1]}' before a "
+              f"branch is made from it. Merge it there, bring it into this branch, and "
+              f"run the check again.", file=sys.stderr)
+        return 1
     except ValueError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 1
 
+    # The branch, for `--lane-from-branch` and for the hint in the no-label refusal.
+    # Named on the command line in CI (the checkout there is a detached merge commit),
+    # read from git by hand.
+    branch = getattr(args, "branch", None) or ""
+    if not branch and (getattr(args, "lane_from_branch", False) or not args.lane):
+        branch = WorktreeManager(root).current_branch(cwd=root)
     try:
-        if args.lane:
-            lane = args.lane
-        elif args.labels_json is not None:
-            lane = check_mod.lane_from_labels_json(args.labels_json, args.label_prefix)
-        else:
-            raise check_mod.NoLaneError(
-                "Say which lane this change belongs to: --lane <name>, or --labels-json "
-                "with the pull request's labels.")
+        lane = check_mod.resolve_lane(
+            explicit=args.lane or "", labels_json=args.labels_json,
+            label_prefix=args.label_prefix, branch=branch, lanes=list(config.lanes),
+            branch_prefix=config.git.branch_prefix,
+            from_branch=getattr(args, "lane_from_branch", False))
     except check_mod.NoLaneError as e:
         print(f"❌ {e}", file=sys.stderr)
         return 2
@@ -1039,7 +1248,160 @@ def cmd_check(args: argparse.Namespace) -> int:
         include_working_tree=args.working_tree)
     print()
     print(check_mod.render(report))
+    if getattr(args, "github", False):
+        # Presentation only (#79): the verdict and the exit code are decided above.
+        # The summary file is GitHub's; when the variable is absent this is not CI
+        # and nothing is written. The annotations are workflow commands on stdout.
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary_path:
+            try:
+                with open(summary_path, "a", encoding="utf-8") as f:
+                    f.write(check_mod.github_summary(report))
+            except OSError as e:
+                print(f"⚠️  Could not write the job summary: {e}", file=sys.stderr)
+        for line in check_mod.annotations(report):
+            print(line)
     return 0 if report.passed else 2
+
+
+def _policy_for_check(root: Path, args: argparse.Namespace) -> Config:
+    """The policy `check` reads at `root`, which inside an agent's worktree is the
+    main checkout's whenever the two differ.
+
+    A worktree carries the policy as of the commit it was branched from — none at all
+    on the first agent, a stale one after `lanekeeper allow` has widened a lane in the
+    main checkout (#62). The main checkout's copy is the one being maintained, and it
+    is the one CI will read once it is committed: the gate checks the merge commit,
+    which carries the base branch's policy. So the local check reads it too, and says
+    so whenever that is not what this worktree holds. Raises FileNotFoundError when
+    neither has one, and ValueError for a policy that cannot be loaded.
+    """
+    main = WorktreeManager.main_worktree_root()
+    if main is None or main.resolve() == root.resolve():
+        return load_config(root)
+    own = paths.config_path(root)
+    theirs = paths.config_path(main)
+    if not theirs.exists():
+        return load_config(root)
+    if not own.exists():
+        config = load_config(main)
+        print(f"ℹ️  This checkout has no policy of its own; reading the one in {main}.")
+        print(f"   Commit the policy on '{args.base.split('/')[-1]}' so the gate in CI "
+              f"reads it too.")
+        return config
+    try:
+        same = own.read_bytes() == theirs.read_bytes()
+    except OSError:
+        same = False
+    if same:
+        return load_config(root)
+    config = load_config(main)
+    print(f"ℹ️  Reading the policy from the main checkout ({theirs}), which differs from "
+          f"this worktree's copy.")
+    print(f"   That is the policy the gate reads once it is committed; bring it into "
+          f"this branch when it is.")
+    return config
+
+
+def cmd_allow(args: argparse.Namespace) -> int:
+    """`lanekeeper allow <path> --lane <name>`: one decision, recorded (#62).
+
+    The gate names the file it blocked and, until this existed, left the person to
+    find the policy, find the lane, and add a line at the right indentation. Six
+    steps for one decision — *yes, that file belongs to this lane* — at the moment
+    that decides whether somebody keeps the gate switched on. The decision is still
+    theirs: this command never widens a lane by itself, and it refuses the cases that
+    exist precisely so a person makes the call deliberately.
+    """
+    try:
+        here = WorktreeManager._find_repo_root()
+    except GitError:
+        here = Path.cwd()
+    # The policy lives in the main checkout. Inside an agent's worktree, that is the
+    # checkout this worktree was made from — and its `.lane` says which lane this is.
+    main = WorktreeManager.main_worktree_root()
+    root = main if (main is not None and main != here) else here
+    lane_name = args.lane or ""
+    if not lane_name:
+        lane_name = check_mod.read_lane_file(here / ".lane").get("LANE", "")
+    if not lane_name:
+        print("❌ Say which lane: --lane <name>. (Inside an agent's worktree, its own "
+              "lane is the default.)", file=sys.stderr)
+        return 1
+    try:
+        config = load_config(root)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    if lane_name == check_mod.POLICY_LANE or not config.has_lane(lane_name):
+        known = ", ".join(sorted(config.lanes)) or "(none declared)"
+        print(f"❌ Unknown lane '{lane_name}'. Declared lanes: {known}.", file=sys.stderr)
+        return 1
+    lane = config.get_lane(lane_name)
+    if lane.shared:
+        print(f"❌ '{lane_name}' is a shared zone. It exists so a change there is "
+              f"decided by a person, not widened by a command; edit "
+              f"{paths.display_config_path(root)} yourself.", file=sys.stderr)
+        return 1
+
+    wanted = ticket_mod._clean(list(args.paths))
+    added, already, refused = [], [], []
+    for path in wanted:
+        problem = _allow_refusal(config, lane, path)
+        if problem:
+            refused.append((path, problem))
+        elif path in lane.allow or any(LaneEngine.match_glob(path, p) for p in lane.allow
+                                       if not any(c in path for c in "*?[")):
+            already.append(path)
+        else:
+            added.append(path)
+    for path, why in refused:
+        print(f"❌ {path}: {why}", file=sys.stderr)
+    if refused:
+        print("   Nothing was changed.", file=sys.stderr)
+        return 1
+    for path in added:
+        lane.allow.append(path)
+    if added:
+        save_config(config, root)
+    for path in added:
+        print(f"✅ {path} is now allowed in lane '{lane_name}'.")
+    for path in already:
+        print(f"ℹ️  {path} was already allowed in lane '{lane_name}'.")
+    if added:
+        print(f"   {paths.display_config_path(root)} changed; commit it (it is the policy, "
+              f"so on its own, labelled 'lane: policy') for the gate in CI to read it.")
+    return 0
+
+
+def _allow_refusal(config: Config, lane: LaneConfig, path: str) -> str:
+    """Why `allow` will not add this path, or "" when it may."""
+    from .divide.collision import patterns_intersect
+    if LaneEngine.is_policy(path) or any(
+            LaneEngine.match_glob(path, p) for p in check_mod.policy_lane_paths(config)):
+        return ("this is a policy file. No lane may own it; a change to it is made under "
+                "the 'policy' lane, by a person.")
+    for pattern in lane.deny:
+        if LaneEngine.match_glob(path, pattern) or patterns_intersect(pattern, path):
+            # `deny` beats `allow` in the engine, so appending here would report a
+            # decision that has no effect. A carve-out was written on purpose.
+            return (f"lane '{lane.name}' denies it (matched '{pattern}'), and deny beats "
+                    f"allow. That carve-out was written on purpose; remove it in "
+                    f"{paths.display_config_path()} if it no longer holds.")
+    for zone in LaneEngine.shared_lanes(config):
+        if zone.name != lane.name and LaneEngine.claims(path, zone):
+            return (f"this is in the shared zone '{zone.name}', which belongs to no lane on "
+                    f"purpose. A change there is escalated, not claimed.")
+    for other in sorted(config.lanes.values(), key=lambda l: l.name):
+        if other.name == lane.name or other.shared or other.retired:
+            continue
+        for theirs in other.allow:
+            if patterns_intersect(theirs, path):
+                return (f"lane '{other.name}' already claims it ({theirs}). Widening "
+                        f"'{lane.name}' into another lane's territory is the collision "
+                        f"the gate exists to prevent — decide it in "
+                        f"{paths.display_config_path()}, or mark the file 'shared: true'.")
+    return ""
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
@@ -1141,14 +1503,17 @@ def cmd_diff(args: argparse.Namespace) -> int:
         print(f"   Agent '{agent.id}' cannot be diffed against an undeclared lane.", file=sys.stderr)
         return 1
     lane_res = LaneEngine.validate_files(
-        changed_files, lane_config, LaneEngine.shared_lanes(config))
+        changed_files, lane_config, LaneEngine.shared_lanes(config),
+        generated=config.generated)
 
     print(f"\n📝 DIFF SUMMARY FOR {agent.name} ({agent.id})")
     print(f"Branch: {agent.branch}")
     # Bookkeeping files (.lane, .env) are written by lanekeeper itself and are not
-    # listed below, so counting them here made the total disagree with the list.
+    # listed below, so counting them here made the total disagree with the list. The
+    # same goes for files the policy declares a build writes.
     shown = [f for f in changed_files
-             if not LaneEngine.is_bookkeeping(LaneEngine.normalize_path(f))]
+             if not LaneEngine.is_bookkeeping(LaneEngine.normalize_path(f))
+             and LaneEngine.normalize_path(f) not in lane_res.generated_files]
     print(f"Total Modified Files: {len(shown)}\n")
 
     for f in shown:
@@ -1165,6 +1530,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
         else:
             print(f"  ✓ [LANE OK]    {norm_f}")
 
+    if lane_res.generated_files:
+        print(f"  ({len(lane_res.generated_files)} generated file(s) left out, as the policy "
+              f"says: {', '.join(lane_res.generated_files)})")
     print()
     return 0
 
@@ -1196,6 +1564,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
     else:
         for v in report.lane_result.violations:
             print(f"    ✗ Violation: {v.filepath} (Reason: {v.reason})")
+            if v.reason == "not_allowed":
+                print(f"        If this file belongs in this lane: "
+                      f"{invocation()} allow --lane {report.lane} {v.filepath}")
+    if report.lane_result.generated_files:
+        print(f"    ({len(report.lane_result.generated_files)} generated file(s) left out, "
+              f"as the policy says: {', '.join(report.lane_result.generated_files)})")
 
     # Capability gates
     if report.gates_evaluated:
@@ -1326,6 +1700,8 @@ def cmd_codeowners(args: argparse.Namespace) -> int:
     if plan.unowned_lanes:
         print(f"   No owner, so left out: {', '.join(plan.unowned_lanes)}")
         print("   Give them an 'owner:' in config.yaml, or a --owner for everything.")
+    if plan.retired_lanes:
+        print(f"   Retired, so left out: {', '.join(plan.retired_lanes)}")
     if plan.skipped_count:
         print(f"   {plan.skipped_count} pattern(s) CODEOWNERS cannot express were "
               f"skipped; the file says which and why:")
@@ -1576,13 +1952,36 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     #     unmerged branch is kept and named, because a branch is the one thing here that
     #     may hold work nobody has merged yet. Monotonic agent ids meant these used to
     #     pile up forever, and a re-spawned agent silently resumed an old one.
+    # The natural moment to ask whether the lane is finished (#70) — and only to ask.
+    # Nothing here reads the tracker or edits the policy: a closed ticket does not
+    # mean the lane is done, and narrowing enforcement is never the tool's to do.
+    retire_note = ""
+    try:
+        lane_cfg = load_config(root).lanes.get(agent.lane)
+    except Exception:
+        lane_cfg = None
+    if lane_cfg is not None and lane_cfg.ticket and not lane_cfg.retired:
+        others = [a for a in state_mgr.list_agents()
+                  if a.id != agent.id and a.lane == agent.lane
+                  and a.status not in TERMINAL_STATUSES]
+        if not others:
+            retire_note = (
+                f"   If #{lane_cfg.ticket} is finished, you can mark lane '{agent.lane}' "
+                f"retired — 'retired: true' under it in {paths.display_config_path()}. "
+                f"A suggestion, and the edit is yours: the collision report and "
+                f"CODEOWNERS then skip it; the gate does not change.")
+
+    # Deleted only when merged into the base branch — asked of git directly, never
+    # inferred from `git branch -d` (#65): that flag says yes to a branch whose upstream
+    # holds its commits, which is the normal end state of an agent's work with an open
+    # pull request, and "fully merged" was then said about work nobody had merged.
     branch_note = ""
     if agent.branch:
-        if worktree_mgr.delete_branch(agent.branch):
-            branch_note = f"   Deleted branch {agent.branch} (fully merged)."
+        base = worktree_mgr.merge_target()
+        if worktree_mgr.delete_branch(agent.branch, base=base):
+            branch_note = f"   Deleted branch {agent.branch} (merged into {base})."
         elif worktree_mgr.branch_exists(agent.branch):
-            branch_note = (f"   Kept branch {agent.branch}: it has commits nobody has merged. "
-                           f"Delete it yourself with 'git branch -D' when you are sure.")
+            branch_note = "   " + worktree_mgr.describe_kept_branch(agent.branch, base)
 
     # 3. Release ports, and say so when one is still being served. A reservation can be
     # withdrawn from the ledger, but a process nobody recorded a PID for cannot be, and
@@ -1599,6 +1998,8 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         print(f"   Released ports: {', '.join(str(p) for p in released)}")
     if branch_note:
         print(branch_note)
+    if retire_note:
+        print(retire_note)
     if still_bound:
         ports = ", ".join(str(p) for p in sorted(still_bound))
         print(f"⚠️  Port(s) {ports} are still bound by a live process.")
@@ -1673,10 +2074,60 @@ def cmd_declare(args: argparse.Namespace) -> int:
     return 0 if report.is_valid else 2
 
 
+#: The front door (#64). Twenty-two commands in registration order told a new user
+#: nothing about which to run first — `init`, the legacy escape hatch that writes
+#: technology-layer lanes, came fifth and `spawn` ninth. The whole adoption argument
+#: is "one command per ticket"; the place a person looks first has to say so.
+HELP_EPILOG = """\
+Most people need one command:
+
+  lanekeeper spawn --ticket 12     hand a ticket to an agent: a worktree, a branch,
+                                   ports, and the ticket's own file list as its
+                                   boundary. Writes the policy for you the first time.
+  lanekeeper install-gate          make the boundary enforceable on pull requests
+
+Working with agents:   status  open  check  allow  validate  diff  cleanup
+The whole backlog:     start  intake  divide  board
+Housekeeping:          doctor  repair  codeowners  uninit
+Without a tracker:     init    (writes lanes read from your folders; falls back to
+                                technology layers, which is not the split to keep)
+
+New here?  https://github.com/kish21/parallel-agents/blob/main/docs/getting-started.md
+"""
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, with one manner: a mistyped command names the nearest real one.
+
+    `spwan` used to get the full list of twenty-two choices and nothing else. Git says
+    "the most similar command is"; three lines of difflib do the same here.
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        if "invalid choice:" in message and self._subparsers is not None:
+            typed = message.split("invalid choice:", 1)[1].split("(", 1)[0].strip().strip("'\"")
+            choices: List[str] = []
+            for action in self._subparsers._group_actions:
+                choices.extend(getattr(action, "choices", {}) or [])
+            close = difflib.get_close_matches(typed, choices, n=3, cutoff=0.5)
+            if close:
+                self.print_usage(sys.stderr)
+                names = ", ".join(f"'{c}'" for c in close)
+                which = "The most similar command is" if len(close) == 1 \
+                    else "The most similar commands are"
+                self.exit(2, f"{self.prog}: error: '{typed}' is not a lanekeeper command. "
+                             f"{which} {names}.\n")
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="lanekeeper",
-        description="Lanekeeper — Mechanical Safety & Coordination Tool for AI Coding Agents",
+        description="Lanekeeper keeps parallel coding agents in their lanes: one worktree,\n"
+                    "one branch, one port range and one file boundary each, with a gate\n"
+                    "that fails a change which leaves its boundary.",
+        epilog=HELP_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # The first question asked of any installed CLI is which build is on the machine.
     # It reports the version of the distribution actually installed, not a literal.
@@ -1694,7 +2145,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repo", "-C", metavar="PATH", dest="repo_root", default=None,
         help="Run against this repository instead of the current directory")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>",
+                                       help="Command to run")
 
     # init
     # The guided entry point. `init` is unchanged and stays available for someone who
@@ -1789,6 +2241,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_spawn.add_argument("--force", action="store_true", help="Bypass max agent capacity check")
     p_spawn.add_argument("--open", action="store_true",
                          help="Open the new worktree in the configured editor")
+    p_spawn.add_argument("--remote-branch", choices=["continue", "rename", "ignore"],
+                         default=None,
+                         help="When the branch name already exists on the remote: "
+                              "continue that work, start fresh under a new name, or "
+                              "use the name anyway")
+    p_spawn.add_argument("--accept-overlap", action="store_true",
+                         help="With --ticket: proceed without asking when another lane "
+                              "claims some of the same files")
     p_spawn.set_defaults(func=cmd_spawn)
 
     # `check --write-workflow` writes a file and checks nothing, which is not a name
@@ -1823,11 +2283,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_chk.add_argument("--head", default="HEAD", help="The change (default HEAD)")
     p_chk.add_argument("--working-tree", action="store_true",
                        help="Also check uncommitted and untracked files")
+    p_chk.add_argument("--branch", default=None,
+                       help="The change's branch name (default: the one checked out); "
+                            "with --lane-from-branch, where the lane is read from")
+    p_chk.add_argument("--lane-from-branch", action="store_true",
+                       help="When no label names a lane, read it from a branch name "
+                            "lanekeeper made; a label still wins, and one that disagrees "
+                            "with the branch fails")
+    p_chk.add_argument("--github", action="store_true",
+                       help="In GitHub Actions: write the verdict to the job summary and "
+                            "annotate each violated file")
     p_chk.add_argument("--write-workflow", action="store_true",
                        help=f"Write the GitHub Actions workflow to {check_mod.WORKFLOW_PATH.as_posix()} and exit")
     p_chk.add_argument("--force", action="store_true",
                        help="With --write-workflow, replace an existing workflow file")
     p_chk.set_defaults(func=cmd_check)
+
+    # allow
+    p_allow = subparsers.add_parser(
+        "allow", help="Add a file the gate blocked to a lane, without editing YAML")
+    p_allow.add_argument("paths", nargs="+", metavar="PATH",
+                         help="File or glob to allow (comma-separated also works)")
+    p_allow.add_argument("--lane", help="The lane (default: this worktree's own lane)")
+    p_allow.set_defaults(func=cmd_allow)
 
     # stop
     p_stop = subparsers.add_parser("stop", help="Stop a running agent process")
@@ -1935,8 +2413,18 @@ def enter_repo(path: str) -> Optional[str]:
         # Silently initialising one level down would produce a second, half-working
         # setup that the gate in CI never reads, and nothing would say why.
         return (f"--repo {path} is inside a repository but is not its root. "
-                f"Use --repo {top.as_posix()}")
+                f"Use --repo {repo_root_suggestion(top)}")
     return None
+
+
+def repo_root_suggestion(top) -> str:
+    """The repository root as the person would type it on this platform (#66).
+
+    `str()`, not `as_posix()`: a suggestion meant to be pasted should look like
+    what the person just typed, and on Windows that has backslashes. The posix form
+    is right for globs and for anything written into a file, which this is not.
+    """
+    return str(top)
 
 
 def main() -> None:

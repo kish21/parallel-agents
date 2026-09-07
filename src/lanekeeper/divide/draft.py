@@ -394,10 +394,17 @@ def apply_to_config(document: dict, root: Path,
         body = body or {}
         if str(name) in skipped:
             continue
+        tickets = [str(t) for t in (body.get("tickets") or []) if t is not None]
         lanes[str(name)] = LaneConfig(
             name=str(name),
             allow=list(_paths_of(body.get("allow") or [])),
             deny=list(_paths_of(body.get("deny") or [])),
+            # Provenance (#70): the tickets this entry was built from, and that the
+            # person confirmed the paths — a proposed block the person uncommented
+            # is, by that act, a confirmed one. The draft's `tickets` key is its own
+            # bookkeeping and is not written to `lanes.yaml`; the policy keeps it.
+            ticket=", ".join(tickets),
+            paths_from="ticket" if tickets else "",
         )
     config.lanes = lanes
     return save_config(config, root), skipped, created

@@ -149,6 +149,39 @@ class GitHubIssuesTracker(IssueTracker):
                                else res.stdout)
         return issues[0] if issues else None
 
+    def pull_request_for_branch(self, branch: str) -> Optional[str]:
+        """`gh pr list --head <branch>`: the open pull request on that branch, if any.
+
+        Best effort by design. It exists to tell somebody *which* pull request their
+        branch name already belongs to; a `gh` that is missing, not logged in, or
+        pointed at the wrong repository is answered with None, never with an error,
+        because the spawn does not depend on it.
+        """
+        argv = [self._settings.command, "pr", "list", "--head", branch, "--state", "open",
+                "--json", "number,title,url", "--limit", "1"]
+        if self._settings.repo:
+            argv += ["--repo", self._settings.repo]
+        try:
+            res = self._run(argv)
+        except (OSError, Exception):
+            return None
+        if res.returncode != 0:
+            return None
+        try:
+            data = json.loads(res.stdout or "[]")
+        except ValueError:
+            return None
+        if not isinstance(data, list) or not data:
+            return None
+        pr = data[0] or {}
+        number = pr.get("number")
+        title = str(pr.get("title") or "").strip()
+        url = str(pr.get("url") or "").strip()
+        if number is None:
+            return None
+        return f"pull request #{number}" + (f" ({title})" if title else "") \
+            + (f" — {url}" if url else "")
+
     # -- internals ---------------------------------------------------------------
 
     def _list_argv(self) -> List[str]:

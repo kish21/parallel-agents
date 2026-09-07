@@ -131,6 +131,8 @@ class Plan:
     #: error in CODEOWNERS, and inventing an owner would route reviews to somebody who
     #: never agreed to them.
     unowned_lanes: List[str] = field(default_factory=list)
+    #: Lanes marked `retired: true`, left out on purpose (#70).
+    retired_lanes: List[str] = field(default_factory=list)
 
     @property
     def has_rules(self) -> bool:
@@ -173,8 +175,12 @@ def build_plan(config: Config, default_owner: Sequence[str] = (),
     shared zone's ownership, which is the exact failure the zone exists to prevent.
     """
     plan = Plan()
-    ordinary = [l for l in config.lanes.values() if not l.shared]
-    shared = [l for l in config.lanes.values() if l.shared]
+    # A retired lane (#70) routes nothing: its work is finished, and a review request
+    # for a lane nobody works in is a request to somebody who has moved on.
+    live = [l for l in config.lanes.values() if not l.retired]
+    plan.retired_lanes = [l.name for l in config.lanes.values() if l.retired]
+    ordinary = [l for l in live if not l.shared]
+    shared = [l for l in live if l.shared]
 
     for lane in ordinary + shared:
         owners = _owners_for(lane, default_owner)
