@@ -250,8 +250,11 @@ class TestWork(RepoWithRemote):
         wt = self.spawn()
         # A stand-in agent: records where it ran and what it was told.
         stub = self.root.parent / "agent-stub.py"
+        # The stub writes UTF-8 explicitly: the prompt carries an em dash, and on
+        # Windows the platform default is cp1252, which cannot encode it.
         stub.write_text("import os, sys, pathlib\n"
-                        "pathlib.Path(sys.argv[1]).write_text(os.getcwd() + '\\n' + sys.argv[2])\n",
+                        "pathlib.Path(sys.argv[1]).write_text(os.getcwd() + '\\n' + sys.argv[2],"
+                        " encoding='utf-8')\n",
                         encoding="utf-8")
         record = self.root.parent / "record.txt"
         res = run_cli(["work", "agent-001", "--", sys.executable, str(stub), str(record)],
@@ -286,7 +289,10 @@ class TestHook(RepoWithRemote):
         self.assertEqual(res.returncode, 0, output_of(res))
         hook = self.root / ".git" / "hooks" / "pre-push"
         self.assertTrue(hook.exists())
-        self.assertTrue(hook.stat().st_mode & stat.S_IXUSR)
+        if os.name != "nt":
+            # NTFS has no executable bit; Git for Windows runs hooks through sh
+            # regardless, so only the POSIX platforms have anything to assert.
+            self.assertTrue(hook.stat().st_mode & stat.S_IXUSR)
         text = hook.read_text(encoding="utf-8")
         self.assertIn("parallel/*", text)
         self.assertIn("--lane-from-branch", text)
@@ -477,7 +483,8 @@ class TestTheReviewFindings(RepoWithRemote):
         self.spawn()
         stub = self.root.parent / "agent-stub.py"
         stub.write_text("import sys, pathlib\n"
-                        "pathlib.Path(sys.argv[1]).write_text(' '.join(sys.argv[2:]))\n",
+                        "pathlib.Path(sys.argv[1]).write_text(' '.join(sys.argv[2:]),"
+                        " encoding='utf-8')\n",
                         encoding="utf-8")
         record = self.root.parent / "record.txt"
         res = run_cli(["work", "agent-001", "--", sys.executable, str(stub), str(record),
