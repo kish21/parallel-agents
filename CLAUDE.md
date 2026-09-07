@@ -777,3 +777,21 @@ test file that fails against 0.7.12 (`test_deep_test_findings`, `test_gate_findi
   is red or missing; stop and report what is blocking instead.
 - One subtask per session. Finish with `/code-review`, a confidence score against the
   issue's definition of done, a PR saying `Closes #N`, and an update to this file.
+- **Set the git identity before the first commit of a session**, because a fresh remote
+  container defaults to `Claude <noreply@anthropic.com>` and every commit made under it
+  is authored by Claude on the pull request timeline — the owner's own history, under
+  somebody else's name:
+
+      git config user.name "kish21"
+      git config user.email "kishorekv2@gmail.com"
+
+  A squash-merge rewrites the author to whoever merges, so `main` looks right either
+  way; it is the branch and its pull request that carry the wrong name, and by then it
+  is history. The durable fix is `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`,
+  `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` in the environment's own variables —
+  this line is the backstop for when they are not set.
+- **Attribution is off** — `.claude/settings.json` sets `attribution.commit` and
+  `attribution.pr` to empty and `sessionUrl` to false, so commits and pull request
+  bodies carry no Claude trailer, footer or session link. A session that was started
+  before the file existed has already been handed its attribution instruction and will
+  still add them; the setting takes effect from the next session.
