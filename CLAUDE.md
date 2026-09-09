@@ -3,7 +3,8 @@
 Project instructions and build state. Read this first; it exists so each session stops
 re-deriving the same decisions from the issue tracker.
 
-Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.8.0; v0.9.0 is in PR.
+Repository: `kish21/parallel-agents` · package `lanekeeper` · published on PyPI at v0.9.0.
+Backlog empty: no open issues, no open pull requests.
 
 ---
 
@@ -524,7 +525,9 @@ Tests: `tests/test_codeowners.py` (37), plus two in `test_uninit.py`. Suite gree
 **Not done, and it is the definition of done's last clause:** GitHub has not been
 observed showing the expected owner on a real pull request. That needs a repository with
 branch protection and *Require review from Code Owners* switched on — the same missing
-live check as `lanekeeper board`.
+live check as `lanekeeper board`. **Half of this closed on 2026-09-09** — GitHub's own
+parser accepts the generated file; the reviewer request is still unobserved. See the
+session entry at the end of this file.
 
 **Open after this:** #39 and #33 (frozen), #36 (their umbrella). Nothing else.
 
@@ -758,6 +761,60 @@ test file that fails against 0.7.12 (`test_deep_test_findings`, `test_gate_findi
 **Open after this:** nothing, once #62–#80 close with the PR.
 
 ---
+
+## Session of 2026-09-09: CODEOWNERS, in front of GitHub's own parser
+
+No code changed. The v0.7.9 entry ends on the definition of done's last clause — that
+GitHub had never been observed accepting the generated file — and this session closed
+the half of it that is reachable without a second human.
+
+**What was done.** A four-lane config (a feature lane whose `allow` covers the shared
+store, a `shared: true` zone, the implicit `policy` lane) generated a `.github/CODEOWNERS`
+through `lanekeeper codeowners`. That file was pushed to a throwaway branch and handed to
+GitHub's own validator, `GET /repos/{owner}/{repo}/codeowners/errors?ref=`, which is the
+same parser that decides routing on a real pull request.
+
+    generated file   →  0 errors
+    broken control   →  3 errors
+
+**The control is the point.** A clean result proves nothing unless the validator is
+looking, so a second branch carried a file built from the three v0.7.9 review findings
+that write a file which *looks* right and routes wrong. GitHub named all three, and named
+them the way the review predicted:
+
+- an owner missing its `@` → *Invalid owner*, caret under the handle;
+- an owner with no write access → *Unknown owner ... make sure @… exists and has write
+  access*, which is the "routes reviews to somebody who never agreed to them" failure;
+- a space in a path → *Invalid owner*, caret under **the space** — GitHub reads the rest
+  of the line as the owner, exactly as the review said it would.
+
+So the anchoring, the emission order and the owner rendering are confirmed against the
+real parser rather than against our own tests.
+
+**What is still not observed, and why it is not a matter of trying harder.** GitHub
+requesting the lane's owner as a reviewer on a live pull request is blocked twice over,
+and both blocks are structural:
+
+1. *No second person.* `kish21` is the only account with write access, and **GitHub never
+   requests review from the pull request's own author.** With one maintainer every lane's
+   owner is the author, so there is no request to observe. `docs/codeowners.md` already
+   says this in its own words — "with one maintainer and several agents, every path's code
+   owner is the same person, so CODEOWNERS alone just renames the bottleneck". The missing
+   check needs a second collaborator, not a better session.
+2. *No admin on the token.* Branch protection returns 403 *Resource not accessible by
+   integration*, so *Require review from Code Owners* cannot be switched on from a session.
+
+**Left behind, needing the owner's hand:** two temp branches, `lk-co-check-generated` and
+`lk-co-check-broken`. Deletion is refused on every path a session has — `git push
+--delete`, `git push origin :branch` and `DELETE /git/refs/heads/…` all return 403 (the
+proxy permits pushes, not deletions). They hold one file each, have no pull request, and
+`main` was never touched. Delete them from the repository's Branches page.
+
+**Unchanged and still open:** `lanekeeper board` against a live GitHub project; the gate's
+`--github` summary and annotations on a real run page; any outside tester.
+
+---
+
 
 ## Working conventions in this repository
 
