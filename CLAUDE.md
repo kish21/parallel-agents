@@ -825,6 +825,10 @@ proxy permits pushes, not deletions). They hold one file each, have no pull requ
   spawn real subprocesses and are slow; the full run takes a few minutes.
 - Never let a test touch the network or require `gh` to be installed. Inject a fake at a
   seam — `_intake_fakes.FakeTracker`, or `cli.get_tracker`.
+- **Try things on a test repository, never on this one.** `kish21/mini-issue-tracker`
+  and `kish21/subscription-tracker` exist for trial runs. A session cannot delete a
+  branch it pushed (the proxy permits pushes, not deletions), so a throwaway branch on
+  `parallel-agents` is litter the owner has to clear by hand.
 - Filesystem layout goes through `lanekeeper.paths`, never a literal `.lanekeeper`.
 - Every path lanekeeper writes lives under `paths.home()`, which `.gitignore` already
   excludes except for `config.yaml`.
