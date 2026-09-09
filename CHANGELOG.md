@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.9.1] — 2026-09-09
+
+The first end-to-end run against real GitHub CI, on a real project. The gate's verdicts
+were right in every case; one thing it *said* was filed where nobody would read it.
+
+### Fixed
+
+- **The pull-request gate's annotation now lands on a line.** `check.annotations` wrote
+  `::error file=<path>,title=Lane check::<message>` with no `line=`, and GitHub files
+  such an annotation at line 0. Line 0 is not a line: the annotation survived in the
+  check-run API and the run summary, but never anchored in the Files-changed tab — the
+  one place the code set out to write to. A lane violation is about the whole file, so
+  the anchor is line 1. Found on a live run rather than by a test, because the existing
+  test asserted the annotation's prefix and never its line.
+
 ## [v0.9.0] — 2026-09-07
 
 The question after 0.8.0 was how to make this easier for the developer. Every finding

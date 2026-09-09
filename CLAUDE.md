@@ -844,12 +844,19 @@ project it had never seen.
 
 So the `--github` path is confirmed on real run pages in both directions.
 
-**One finding the live run produced, which no test could.** `check.annotations` emits
-`::error file=<path>,title=Lane check::<message>` with **no `line=`**, so GitHub records
-the annotation at **line 0** — visible above, in the API. The function's own docstring
-says it "put[s] each violation on the pull request's Files tab"; an annotation at line 0
-is not anchored to a line there. Adding `line=1` is the likely fix. Not fixed this
-session — recorded, not guessed at.
+**One finding the live run produced, which no test could — and it is fixed (v0.9.1).**
+`check.annotations` emitted `::error file=<path>,title=Lane check::<message>` with **no
+`line=`**, so GitHub recorded the annotation at **line 0**. The function's own docstring
+says it "put[s] each violation on the pull request's Files tab"; line 0 is not a line, so
+it never anchored there. The existing test asserted the annotation's *prefix* and never
+its line, which is why six releases kept it. A lane violation is about the whole file, so
+the anchor is line 1. `tests/test_live_run_findings.py` fails 2 of 3 without the change.
+
+**Verified live, the same way it was found.** PR #16's gate was pointed at this branch
+(`pip install "lanekeeper @ git+…@claude/where-are-we-s128lv"`), re-run, and GitHub then
+filed `src/app/layout.tsx:1` instead of `:0`. The temporary install line was reverted
+afterwards. The same run also annotated the workflow edit itself as outside the lane —
+the gate catching the hand that was editing it.
 
 **`lanekeeper board` still cannot be run, and now we know exactly why.** It fails closed
 with the right message — *"The current token has no 'project' scope"* plus the
