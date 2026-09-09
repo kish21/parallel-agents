@@ -488,6 +488,14 @@ def annotations(report: CheckReport) -> List[str]:
     `::error file=<path>::<message>` needs no permission beyond running: the runner
     reads it from the step's stdout. Only violations that name a file are annotated;
     a change that could not be read at all is one error against the run.
+
+    `line=` is not optional, though it reads as if it were. Omit it and GitHub files
+    the annotation at **line 0**, which is not a line: it survives in the check-run's
+    API and in the run summary, and never anchors in the Files-changed tab this
+    function exists to write to. Seen on subscription-tracker #16, where the gate was
+    right and its annotation still landed nowhere. A lane violation is about the whole
+    file rather than a line in it, so the anchor is line 1 — the top of the file being
+    complained about — which is where a reviewer opening the file starts anyway.
     """
     out: List[str] = []
     for err in report.errors:
@@ -498,7 +506,7 @@ def annotations(report: CheckReport) -> List[str]:
         if not sep or not path.strip() or " " in path.strip():
             continue
         clean = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-        out.append(f"::error file={path.strip()},title=Lane check::{clean}")
+        out.append(f"::error file={path.strip()},line=1,title=Lane check::{clean}")
     return out
 
 
