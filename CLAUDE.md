@@ -816,6 +816,58 @@ proxy permits pushes, not deletions). They hold one file each, have no pull requ
 ---
 
 
+## Session of 2026-09-09 (second): the end-to-end run on a real project — subscription-tracker
+
+Published 0.9.0, run against `kish21/subscription-tracker` (a real Next.js app with
+`PRODUCT.md` and real product-playbook tickets). **`gh` is installable here after all** —
+`apt-get install gh` gives 2.45.0 — which no earlier session tried.
+
+**What is real in this run and what is not.** The repository, the ticket, the worktree,
+the branch, the pull requests, the CI runs and the gate's verdicts are all real. Only the
+issue *transport* is substituted: genuine `gh issue list` / `issue view` go through
+GraphQL, which this session's GitHub relay refuses, so a shim served the same issues over
+REST. The data is the repository's own.
+
+**The gate, end to end.** `spawn --ticket 11` read [ADHOC-02] and took the lane from the
+ticket's *📁 Target Files* list (`auth-form.tsx`, `docs/features/auth.md`) with no
+`--allow` needed. In-lane edits: **PASS**. A file outside the lane: **FAIL**, naming it.
+A `.lanekeeper/config.yaml` edit from an ordinary lane: **FAIL**. The worktree correctly
+borrowed the main checkout's policy and said so — the v0.7.4/v0.8.0 fix, working on a
+project it had never seen.
+
+**On real CI, which is the thing that had never been observed:**
+
+- PR #15 (`lane: policy`) — gate **passed**, `--labels-json` carrying the real label,
+  lane resolved, 3 files checked. Log read from the run.
+- PR #16 (`lane: adhoc-02`, one file outside the lane on purpose) — gate **failed**, and
+  GitHub carried the annotation: `src/app/layout.tsx:0 — outside lane 'adhoc-02'`.
+
+So the `--github` path is confirmed on real run pages in both directions.
+
+**One finding the live run produced, which no test could.** `check.annotations` emits
+`::error file=<path>,title=Lane check::<message>` with **no `line=`**, so GitHub records
+the annotation at **line 0** — visible above, in the API. The function's own docstring
+says it "put[s] each violation on the pull request's Files tab"; an annotation at line 0
+is not anchored to a line there. Adding `line=1` is the likely fix. Not fixed this
+session — recorded, not guessed at.
+
+**`lanekeeper board` still cannot be run, and now we know exactly why.** It fails closed
+with the right message — *"The current token has no 'project' scope"* plus the
+`gh auth refresh -s project,read:project` remedy. That is the correct behaviour and the
+first time `board` has met real GitHub. Creating a board is **impossible from any session
+here**: Projects v2 is GraphQL-only, and the relay serves only a pinned set of PR-review
+GraphQL operations — even `{viewer{login}}` is refused. Classic-projects REST is gone
+(404). This needs a machine with a `project`-scoped token; it is not a lanekeeper defect
+and no session will close it.
+
+**Left on subscription-tracker:** branches `lanekeeper-policy` and `agent-adhoc-02` with
+PRs #15 and #16, kept as the evidence. #16 is *meant* to be red. Neither is merged;
+`main` is untouched. The repo's own `Test & Build` job is red on `main` too — pre-existing,
+not this trial.
+
+---
+
+
 ## Working conventions in this repository
 
 - **Tests are `unittest` classes run under pytest.** Helper imports use
